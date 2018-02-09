@@ -1,18 +1,19 @@
 from setuptools import setup
-from Cython.Build import cythonize
+from Cython.Distutils import build_ext
 from distutils.extension import Extension
 import numpy
 
 extensions = [
-    Extension("cmf_newton_solver", ["cmf_newton_solver.pyx"])
+    Extension("cmf_newton_solver", ["pycmf/cmf_newton_solver.pyx"])
 ]
 
 setup(                                                                        
-    name='CMF',
+    name='pycmf',
     version='1.0.0',
-    packages=['CMF'],
+    packages=['pycmf'],
     include_dirs = [numpy.get_include()],
-    ext_modules=cythonize(extensions),
+    ext_modules=extensions,
+    cmdclass={'build_ext': build_ext},
     url='https://github.com/keitakurita/CMF_Python',
     license='MIT',
     author='keitakurita',
