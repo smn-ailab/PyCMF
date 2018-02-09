@@ -98,4 +98,7 @@ ENV/
 /site
 
 # mypy
-.mypy_cache/
+.mypy_cache
+
+# temporary files
+tmp_*/
