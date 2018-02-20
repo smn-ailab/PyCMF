@@ -263,32 +263,7 @@ class MUSolver(_IterativeCMFSolver):
 
 if USE_CYTHON:
     class NewtonSolver(_IterativeCMFSolver):
-        """Internal solver that solves using the Newton-Raphson method.
-        """
-        # def _stochastic_sample(self, ):
-            
-        def _newton_update_U(self, U, V, X, alpha, l1_reg, l2_reg,
-                             link="linear", non_negative=True):
-            # TODO: Only pass necessary parameters
-            return _newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
-                                    link, non_negative,
-                                    self.sg_sample_ratio,
-                                    self.hessian_pertubation)
-
-        def _newton_update_V(self, V, U, Z, X, Y, alpha, l1_reg, l2_reg,
-                             x_link="linear", y_link="linear", non_negative=True):
-            return _newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
-                                   x_link, y_link, non_negative,
-                                   self.sg_sample_ratio,
-                                   self.hessian_pertubation)
-
-        def _newton_update_Z(self, Z, V, Y, alpha, l1_reg, l2_reg,
-                             link="linear", non_negative=True):
-            return _newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
-                                    link, non_negative,
-                                    self.sg_sample_ratio,
-                                    self.hessian_pertubation)
-
+        """Internal solver that solves using the Newton-Raphson method."""
         def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
             _newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
                              self.x_link, self.U_non_negative,
