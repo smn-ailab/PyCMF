@@ -234,8 +234,8 @@ def _newton_update_V(np.ndarray[double, ndim=2] V,
 
         U_sampled, X_sampled = _stochastic_sample(U, X, sg_sample_ratio, 0)
         assert(np.ndim(v_i) == 1)
-        res_X = _residual_T(U_sampled, v_i, X_sampled[:, i], x_link, res_X_should_flatten) #SLOW: 50%
-        # res_X = _residual(v_i, U_sampled.T, X_sampled[:, i].T, x_link, res_X_should_flatten).T
+        # res_X = _residual_T(U_sampled, v_i, X_sampled[:, i], x_link, res_X_should_flatten) #SLOW: 50%
+        res_X = _residual(v_i, U_sampled.T, X_sampled[:, i].T, x_link, res_X_should_flatten).T
 
         Z_T_sampled, Y_sampled = _stochastic_sample(Z.T, Y, sg_sample_ratio, 1)
         res_Y = _residual(v_i, Z_T_sampled, Y_sampled[i, :], y_link, res_Y_should_flatten)
