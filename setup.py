@@ -4,21 +4,21 @@ from distutils.extension import Extension
 import numpy
 
 extensions = [
-    Extension("cmf_newton_solver", ["pycmf/cmf_newton_solver.pyx"])
+    Extension("pycmf.cmf_newton_solver", ["pycmf/cmf_newton_solver.pyx"])
 ]
 
-setup(                                                                        
+setup(
     name='pycmf',
     version='0.9.0',
     packages=['pycmf'],
-    include_dirs = [numpy.get_include()],
+    include_dirs=[numpy.get_include()],
     ext_modules=extensions,
     cmdclass={'build_ext': build_ext},
     url='https://github.com/keitakurita/smn-ailab/PyCMF',
     license='MIT',
     author='keitakurita',
     author_email='keita.kurita@gmail.com',
-    description='A library for collective matrix factorization in Python.',   
+    description='A library for collective matrix factorization in Python.',
     install_requires=['scipy', 'numpy', 'scikit-learn'],
     classifiers=[
         'Programming Language :: Python :: 3.6'

@@ -2,14 +2,12 @@
 import numpy as np
 import scipy.sparse as sp
 from scipy import linalg
-import sys
-sys.path.append("..")
 import itertools
 import pytest
 
-from CMF import CMF, collective_matrix_factorization, analysis
+from pycmf import CMF, collective_matrix_factorization, analysis
 import sklearn.decomposition.nmf as nmf
-from scipy.sparse import csc_matrix
+from scipy.sparse import csr_matrix
 from sklearn.utils.testing import assert_true
 from sklearn.utils.testing import assert_false
 from sklearn.utils.testing import assert_raise_message, assert_no_warnings
@@ -22,8 +20,9 @@ from sklearn.utils.testing import ignore_warnings
 from sklearn.utils.extmath import squared_norm
 from sklearn.base import clone
 from sklearn.exceptions import ConvergenceWarning
-from scipy.sparse import csc_matrix
 from sklearn.feature_extraction.text import CountVectorizer
+
+solvers = ["mu", "newton"]
 
 
 def test_input_shape_compatibility_check():
@@ -37,32 +36,32 @@ def test_input_shape_compatibility_check():
 
 # ignore UserWarning raised when both solver='mu' and init='nndsvd'
 @ignore_warnings(category=UserWarning)
-def test_fit_nn_output():
+@pytest.mark.parametrize("solver", solvers)
+def test_fit_nn_output(solver):
     # Test that the decomposition does not contain negative values
     X = np.c_[5 * np.ones(5) - np.arange(1, 6),
               5 * np.ones(5) + np.arange(1, 6)]
     Y = np.c_[5 * np.ones(5) - np.arange(1, 6),
               5 * np.ones(5) + np.arange(1, 6)].T
-    for solver in ('newton', 'mu'):
-        for init in (None, 'nndsvd', 'nndsvda', 'nndsvdar', 'random'):
-            model = CMF(n_components=2, solver=solver, x_init=init, y_init=init,
-                        random_state=0)
-            U, V, Z = model.fit_transform(X, Y)
-            assert_false((U < 0).any() or
-                         (V < 0).any() or
-                         (Z < 0).any())
+    for init in (None, 'nndsvd', 'nndsvda', 'nndsvdar', 'random'):
+        model = CMF(n_components=2, solver=solver, x_init=init, y_init=init,
+                    random_state=0)
+        U, V, Z = model.fit_transform(X, Y)
+        assert_false((U < 0).any() or
+                     (V < 0).any() or
+                     (Z < 0).any())
 
 
-def test_fit_close():
+@pytest.mark.parametrize("solver", solvers)
+def test_fit_close(solver):
     rng = np.random.mtrand.RandomState(42)
     # Test that the fit is not too far away
-    for solver in ('newton', 'mu'):
-        for rndm_state in [0]:
-            pnmf = CMF(n_components=5, solver=solver, x_init='nndsvdar', y_init='nndsvdar',
-                       random_state=rndm_state, max_iter=1000)
-            X = np.abs(rng.randn(6, 5))
-            Y = np.abs(rng.randn(5, 6))
-            assert_less(pnmf.fit(X, Y).reconstruction_err_, 0.1)
+    for rndm_state in [0]:
+        pnmf = CMF(n_components=5, solver=solver, x_init='nndsvdar', y_init='nndsvdar',
+                   random_state=rndm_state, max_iter=1000)
+        X = np.abs(rng.randn(6, 5))
+        Y = np.abs(rng.randn(5, 6))
+        assert_less(pnmf.fit(X, Y).reconstruction_err_, 0.1)
 
 
 def test_transform_custom_init():
@@ -110,18 +109,18 @@ def test_n_components_greater_n_features():
     CMF(n_components=15, random_state=0, tol=1e-2).fit(X, Y)
 
 
-def test_recover_low_rank_matrix():
+@pytest.mark.parametrize("solver", solvers)
+def test_recover_low_rank_matrix(solver):
     rng = np.random.mtrand.RandomState(42)
     # Test that the fit is not too far away
-    for solver in ('newton', 'mu'):
-        pnmf = CMF(5, solver=solver, x_init='nndsvdar', y_init='nndsvdar',
-                   random_state=0, max_iter=1000)
-        U = np.abs(rng.randn(10, 5))
-        V = np.abs(rng.randn(8, 5))
-        Z = np.abs(rng.randn(6, 5))
-        X = np.dot(U, V.T)
-        Y = np.dot(V, Z.T)
-        assert_less(pnmf.fit(X, Y).reconstruction_err_, 1.0)
+    pnmf = CMF(5, solver=solver, x_init='nndsvdar', y_init='nndsvdar',
+               random_state=0, max_iter=1000)
+    U = np.abs(rng.randn(10, 5))
+    V = np.abs(rng.randn(8, 5))
+    Z = np.abs(rng.randn(6, 5))
+    X = np.dot(U, V.T)
+    Y = np.dot(V, Z.T)
+    assert_less(pnmf.fit(X, Y).reconstruction_err_, 1.0)
 
 
 @ignore_warnings(category=ConvergenceWarning)
@@ -163,7 +162,8 @@ def test_loss_decreasing():
             previous_y_loss = y_loss
 
 
-def test_l1_regularization():
+@pytest.mark.parametrize("solver", solvers)
+def test_l1_regularization(solver):
     n_components = 3
     rng = np.random.mtrand.RandomState(42)
     X = np.abs(rng.randn(6, 5))
@@ -171,51 +171,50 @@ def test_l1_regularization():
 
     # L1 regularization should increase the number of zeros
     l1_reg = 2.
-    for solver in ['newton', 'mu']:
-        reg = CMF(n_components=n_components, solver=solver,
-                  l1_reg=l1_reg, random_state=42)
-        model = CMF(n_components=n_components, solver=solver,
-                    l1_reg=0., random_state=42)
+    reg = CMF(n_components=n_components, solver=solver,
+              l1_reg=l1_reg, random_state=42)
+    model = CMF(n_components=n_components, solver=solver,
+                l1_reg=0., random_state=42)
 
-        U_reg, V_reg, Z_reg = reg.fit_transform(X, Y)
-        U_model, V_model, Z_model = model.fit_transform(X, Y)
+    U_reg, V_reg, Z_reg = reg.fit_transform(X, Y)
+    U_model, V_model, Z_model = model.fit_transform(X, Y)
 
-        U_reg_n_zeros = U_reg[U_reg == 0].size
-        V_reg_n_zeros = V_reg[V_reg == 0].size
-        Z_reg_n_zeros = Z_reg[Z_reg == 0].size
-        U_model_n_zeros = U_model[U_model == 0].size
-        V_model_n_zeros = V_model[V_model == 0].size
-        Z_model_n_zeros = Z_model[Z_model == 0].size
+    U_reg_n_zeros = U_reg[U_reg == 0].size
+    V_reg_n_zeros = V_reg[V_reg == 0].size
+    Z_reg_n_zeros = Z_reg[Z_reg == 0].size
+    U_model_n_zeros = U_model[U_model == 0].size
+    V_model_n_zeros = V_model[V_model == 0].size
+    Z_model_n_zeros = Z_model[Z_model == 0].size
 
-        msg = "solver: {}".format(solver)
+    msg = "solver: {}".format(solver)
 
-        # If one matrix is full of zeros,
-        # it might make sense for the other matrices to reduce the number of zeros
-        # Therefore, we compare the total number of zeros
-        assert_greater(U_reg_n_zeros + V_reg_n_zeros + Z_reg_n_zeros,
-                       U_model_n_zeros + V_model_n_zeros + Z_model_n_zeros, msg)
+    # If one matrix is full of zeros,
+    # it might make sense for the other matrices to reduce the number of zeros
+    # Therefore, we compare the total number of zeros
+    assert_greater(U_reg_n_zeros + V_reg_n_zeros + Z_reg_n_zeros,
+                   U_model_n_zeros + V_model_n_zeros + Z_model_n_zeros, msg)
 
 
-def test_l2_regularization():
+@pytest.mark.parametrize("solver", solvers)
+def test_l2_regularization(solver):
     n_components = 3
     rng = np.random.mtrand.RandomState(42)
     X = np.abs(rng.randn(6, 5))
     Y = np.abs(rng.randn(5, 4))
     # L2 regularization should decrease the mean of the coefficients
     l2_reg = 2.
-    for solver in ['mu', 'newton']:
-        model = CMF(n_components=n_components, solver=solver,
-                    l2_reg=0., random_state=42)
-        reg = CMF(n_components=n_components, solver=solver,
-                  l2_reg=l2_reg, random_state=42)
+    model = CMF(n_components=n_components, solver=solver,
+                l2_reg=0., random_state=42)
+    reg = CMF(n_components=n_components, solver=solver,
+              l2_reg=l2_reg, random_state=42)
 
-        U_reg, V_reg, Z_reg = reg.fit_transform(X, Y)
-        U_model, V_model, Z_model = model.fit_transform(X, Y)
+    U_reg, V_reg, Z_reg = reg.fit_transform(X, Y)
+    U_model, V_model, Z_model = model.fit_transform(X, Y)
 
-        msg = "solver: {}".format(solver)
-        assert_greater(U_model.mean(), U_reg.mean(), msg)
-        assert_greater(V_model.mean(), V_reg.mean(), msg)
-        assert_greater(Z_model.mean(), Z_reg.mean(), msg)
+    msg = "solver: {}".format(solver)
+    assert_greater(U_model.mean(), U_reg.mean(), msg)
+    assert_greater(V_model.mean(), V_reg.mean(), msg)
+    assert_greater(Z_model.mean(), Z_reg.mean(), msg)
 
 
 def test_nonnegative_condition_for_newton_solver():
@@ -268,28 +267,28 @@ def test_logit_link_non_negative_optimization():
     assert_less(model.reconstruction_err_, 0.1)
 
 
-def test_sparse_input():
+@pytest.mark.parametrize("solver", solvers)
+def test_sparse_input(solver):
     # Test that sparse matrices are accepted as input
     rng = np.random.mtrand.RandomState(42)
     A = np.abs(rng.randn(10, 10))
     A[:, 2 * np.arange(5)] = 0
-    A_sparse = csc_matrix(A)
+    A_sparse = csr_matrix(A)
     B = np.abs(rng.randn(10, 5))
     B[2 * np.arange(5), :] = 0
-    B_sparse = csc_matrix(B)
+    B_sparse = csr_matrix(B)
 
-    for solver in ('newton', 'mu'):
-        est1 = CMF(solver=solver, n_components=5,
-                   x_init='random', y_init='random',
-                   random_state=0, tol=1e-2)
-        est2 = clone(est1)
+    est1 = CMF(solver=solver, n_components=5,
+               x_init='random', y_init='random',
+               random_state=0, tol=1e-2)
+    est2 = clone(est1)
 
-        U1, V1, Z1 = est1.fit_transform(A, B)
-        U2, V2, Z2 = est2.fit_transform(A_sparse, B_sparse)
+    U1, V1, Z1 = est1.fit_transform(A, B)
+    U2, V2, Z2 = est2.fit_transform(A_sparse, B_sparse)
 
-        assert_array_almost_equal(U1, U2)
-        assert_array_almost_equal(V1, V2)
-        assert_array_almost_equal(Z1, Z2)
+    assert_array_almost_equal(U1, U2)
+    assert_array_almost_equal(V1, V2)
+    assert_array_almost_equal(Z1, Z2)
 
 
 def test_stochastic_newton_solver():
@@ -315,19 +314,19 @@ def test_svd_ncomponents_lt_nfeatures():
     Y = rng.randn(4, 2)
     model.fit(X, Y)
 
-    
+
 def test_stochastic_newton_solver_sparse_input():
     rng = np.random.mtrand.RandomState(36)
     A = np.abs(rng.randn(10, 10))
     A[:, 2 * np.arange(5)] = 0
-    A_sparse = csc_matrix(A)
+    A_sparse = csr_matrix(A)
     B = np.abs(rng.randn(10, 5))
     B[2 * np.arange(5), :] = 0
-    B_sparse = csc_matrix(B)
+    B_sparse = csr_matrix(B)
 
     est1 = CMF(n_components=5, solver="newton", x_init='svd', y_init='svd',
-                U_non_negative=False, V_non_negative=False, Z_non_negative=False,
-                sg_sample_ratio=0.5, random_state=0, max_iter=1000)
+               U_non_negative=False, V_non_negative=False, Z_non_negative=False,
+               sg_sample_ratio=0.5, random_state=0, max_iter=1000)
     est2 = clone(est1)
 
     U1, V1, Z1 = est1.fit_transform(A, B)
@@ -344,12 +343,12 @@ def test_auto_compute_alpha():
     Y = rng.randn(10, 5)
 
     x_emphasis_model = CMF(n_components=2, solver="newton", x_init='svd', y_init='svd',
-                U_non_negative=False, V_non_negative=False, Z_non_negative=False,
-                random_state=0, max_iter=100, alpha=0.5)
+                           U_non_negative=False, V_non_negative=False, Z_non_negative=False,
+                           random_state=0, max_iter=100, alpha=0.5)
     # automatic = weight * number_of_elements is constant for both X and Y
     y_emphasis_model = CMF(n_components=2, solver="newton", x_init='svd', y_init='svd',
-                U_non_negative=False, V_non_negative=False, Z_non_negative=False,
-                random_state=0, max_iter=100, alpha="auto")
+                           U_non_negative=False, V_non_negative=False, Z_non_negative=False,
+                           random_state=0, max_iter=100, alpha="auto")
 
 
     U1, V1, Z1 = x_emphasis_model.fit_transform(X, Y)
@@ -360,21 +359,21 @@ def test_auto_compute_alpha():
 
 
 @pytest.mark.xfail
-def test_transform_after_fit():
+@pytest.mark.parametrize("solver", solvers)
+def test_transform_after_fit(solver):
     rng = np.random.mtrand.RandomState(36)
     X = rng.randn(7, 5)
     Y = rng.randn(5, 3)
     X_new = rng.randn(7, 10)
-    
-    for solver in ["mu", "newton"]:
-        fit_model = CMF(n_components=2, solver=solver, x_init='svd', y_init='svd',
+
+    fit_model = CMF(n_components=2, solver=solver, x_init='svd', y_init='svd',
                     U_non_negative=False, V_non_negative=False, Z_non_negative=False,
                     random_state=0, max_iter=100)
-        fit_transform_model = clone(fit_model)
-        
-        fit_model.fit(X, Y)
-        U_f, V_f, Z_f = fit_model.transform(X, None)
-        U_ft, V_ft, Z_ft = fit_transform_model.fit_tranform(X, Y)
+    fit_transform_model = clone(fit_model)
+
+    fit_model.fit(X, Y)
+    U_f, V_f, Z_f = fit_model.transform(X, None)
+    U_ft, V_ft, Z_ft = fit_transform_model.fit_tranform(X, Y)
 
 
 def test_analysis():
@@ -385,6 +384,7 @@ def test_analysis():
     X_ = c.fit_transform(["hello world",
                          "goodbye world",
                          "hello goodbye"])
+    X_ = csr_matrix(X_)
     Y = np.abs(rng.randn(3, 1))
     model.fit_transform(X_.T, Y)
     model.print_topic_terms(c, importances=False)

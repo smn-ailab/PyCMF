@@ -2,7 +2,6 @@ import numpy as np
 from scipy.sparse import csc_matrix
 from scipy.special import expit
 import timeit
-import sys; sys.path.append("..")
 from pycmf import CMF
 
 import argparse
