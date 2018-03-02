@@ -78,13 +78,33 @@ def _safe_invert(np.ndarray[DTYPE_t, ndim=2] M, double hessian_pertubation):
 # substitutions for np.dot written in pure Cython
 import scipy
 import scipy.linalg.blas as fblas
+from cpython cimport PyCapsule_GetPointer # PyCObject_AsVoidPtr
 
 # check for fortan here:
 cdef extern from "numpy/arrayobject.h":
     cdef bint PyArray_IS_F_CONTIGUOUS(np.ndarray) nogil
 
-# with those pointers we can now wrap a cython function for these
+ctypedef void (*sgemm_ptr) (char *transA, char *transB,
+                            int *m, int *n, int *k,\
+                            float *alpha,\
+                            float *a, int *lda,\
+                            float *b, int *ldb,\
+                            float *beta, \
+                            float *c, int *ldc)
 
+ctypedef void (*dgemm_ptr) (char *transA, char *transB, \
+                            int *m, int *n, int *k,\
+                            double *alpha,\
+                            double *a, int *lda,\
+                            double *b, int *ldb,\
+                            double *beta, \
+                            double *c, int *ldc)
+
+cdef sgemm_ptr sgemm=<sgemm_ptr>PyCapsule_GetPointer(fblas.sgemm._cpointer, NULL)
+cdef dgemm_ptr dgemm=<dgemm_ptr>PyCapsule_GetPointer(fblas.dgemm._cpointer, NULL)
+
+@cython.binding(True)
+@cython.boundscheck(True)
 def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
         bint transA=False, bint transB=False,
         DTYPE_t alpha=1., DTYPE_t beta=0.):
@@ -115,94 +135,12 @@ def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
     a = <DTYPE_t *>np.PyArray_DATA(_a)
     b = <DTYPE_t *>np.PyArray_DATA(_b)
     c = <DTYPE_t *>np.PyArray_DATA(_c)
-
-    # some of the operations above
-    # are gil needy and thus
-    # only this last chunk can be "ungiled"
-    # when life give you lemons make lemonade
     lda = _a.shape[0]
     ldb = _b.shape[0]
     ldc = _c.shape[0]
     dgemm(transA_char, transB_char, &m, &n, &k, &alpha, &a[0], &lda, &b[0], &ldb,
           &beta, &c[0], &ldc)
     return _c
-
-# borrowed from some other source
-from cpython cimport PyCapsule_GetPointer # PyCObject_AsVoidPtr
-from sklearn.utils.validation import check_array as array2d
-
-def _impose_f_order(X):
-    """Helper Function"""
-    # important to access flags instead of calling np.isfortran,
-    # this catches corner cases.
-    if X.flags.c_contiguous:
-        return array2d(X.T, copy=False, order='F'), True
-    else:
-        return array2d(X, copy=False, order='F'), False
-
-ctypedef void (*sgemm_ptr) (char *transA, char *transB, \
-                            int *m, int *n, int *k,\
-                            float *alpha,\
-                            float *a, int *lda,\
-                            float *b, int *ldb,\
-                            float *beta, \
-                            float *c, int *ldc)
-
-ctypedef void (*dgemm_ptr) (char *transA, char *transB, \
-                            int *m, int *n, int *k,\
-                            double *alpha,\
-                            double *a, int *lda,\
-                            double *b, int *ldb,\
-                            double *beta, \
-                            double *c, int *ldc)
-
-cdef sgemm_ptr sgemm=<sgemm_ptr>PyCapsule_GetPointer(fblas.sgemm._cpointer, NULL)
-cdef dgemm_ptr dgemm=<dgemm_ptr>PyCapsule_GetPointer(fblas.dgemm._cpointer, NULL)
-
-@cython.binding(True)
-@cython.boundscheck(True)
-def vector_matrix_prod(np.ndarray[DTYPE_t, ndim=1] A,
-                       np.ndarray[DTYPE_t, ndim=2] B):
-    """Cython implementation of fast vector matrix product"""
-    # dot = scipy.linalg.get_blas_funcs('gemm', (A, B))
-    # A_, trans_a = _impose_f_order(A.reshape(1, -1))
-    # B, trans_b = _impose_f_order(B)
-    # TODO: Remove this step...?
-    return matmul(A.reshape((1, -1)), B)
-
-@cython.binding(True)
-@cython.boundscheck(True)
-def matrix_vector_prod(np.ndarray[DTYPE_t, ndim=2] matrix,
-                       np.ndarray[DTYPE_t, ndim=1] vector):
-    """Cython implementation of fast matrix vector product"""
-    cdef int k = vector.shape[0]
-    cdef int boundary = matrix.shape[0]
-    cdef int i, j
-    cdef double acc
-    cdef np.ndarray[DTYPE_t, ndim=1] out = np.zeros((boundary, 1))
-    for i in range(boundary):
-        acc = 0.
-        for j in range(k):
-            acc += vector[j] * matrix[i, j]
-        out[i] = acc
-    return out
-
-@cython.binding(True)
-@cython.boundscheck(True)
-def matrix_matrix_prod(np.ndarray[DTYPE_t, ndim=2] matrix,
-                       np.ndarray[DTYPE_t, ndim=2] flat_matrix):
-    """Matrix multiplication between matrix of shape (d, k) and (k, 1)"""
-    cdef int k = flat_matrix.shape[0]
-    cdef int d = matrix.shape[0]
-    cdef int i, j
-    cdef double acc
-    cdef np.ndarray[double, ndim=1] out = np.zeros((d, 1))
-    for i in range(d):
-        acc = 0.
-        for j in range(k):
-            acc += flat_matrix[j, 0] * matrix[i, j]
-        out[i] = acc
-    return out
 
 @cython.binding(True)
 def _residual(np.ndarray[DTYPE_t, ndim=1] left,
@@ -222,18 +160,7 @@ def _residual(np.ndarray[DTYPE_t, ndim=1] left,
         >>> B[:, 0].shape
         (2, 1)
     """
-    estimate = vector_matrix_prod(left, right).flatten()
-    estimate = inverse(estimate, link)
-    if should_flatten:
-        return estimate - target.toarray().flatten()
-    else:
-        return estimate - target
-
-@cython.binding(True)
-def _residual_T(np.ndarray[DTYPE_t, ndim=2] left,
-                np.ndarray[DTYPE_t, ndim=1] right,
-                target, str link, bint should_flatten):
-    estimate = matrix_vector_prod(left, right)
+    estimate = matmul(left.reshape((1, -1)), right).flatten()
     estimate = inverse(estimate, link)
     if should_flatten:
         return estimate - target.toarray().flatten()
@@ -316,7 +243,6 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
 
         U_sampled, X_sampled = _stochastic_sample(U, X, sg_sample_ratio, 0)
         assert(np.ndim(v_i) == 1)
-        # res_X = _residual_T(U_sampled, v_i, X_sampled[:, i], x_link, res_X_should_flatten) #SLOW: 50%
         res_X = _residual(v_i, U_sampled.T, X_sampled[:, i].T, x_link, res_X_should_flatten).T
 
         Z_T_sampled, Y_sampled = _stochastic_sample(Z.T, Y, sg_sample_ratio, 1)
@@ -363,7 +289,6 @@ def _newton_update_Z(np.ndarray[DTYPE_t, ndim=2] Z,
         z_i = Z[i, :]
 
         V_sampled, Y_sampled = _stochastic_sample(V, Y, sg_sample_ratio, 0)
-        # res_Y = _residual_T(V_sampled, z_i, Y_sampled[:, i], link, res_Y_should_flatten) #SLOW: 6.4%
         res_Y = _residual(z_i, V_sampled.T, Y_sampled[:, i].T, link, res_Y_should_flatten).T
 
         dZ = (1 - alpha) * np.dot(res_Y.T, V_sampled) + \
