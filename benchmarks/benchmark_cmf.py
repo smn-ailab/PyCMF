@@ -1,9 +1,8 @@
 import numpy as np
-from scipy.sparse import csc_matrix
+from scipy.sparse import csr_matrix
 from scipy.special import expit
 import timeit
 from pycmf import CMF
-
 import argparse
 parser = argparse.ArgumentParser(description='Benchmark CMF')
 parser.add_argument('--runs', '-r', type=int, default=1,
@@ -11,6 +10,8 @@ parser.add_argument('--runs', '-r', type=int, default=1,
 parser.add_argument('--worst', '-w', action='store_true',
                     help='Whether to print worst performance or not')
 args = parser.parse_args()
+
+SP = csr_matrix
 
 
 class BenchmarkCase:
@@ -57,7 +58,7 @@ def sparse_cmf_benchmark(solver):
     X = np.abs(rng.randn(2000, 150))
     X[:1000, 2 * np.arange(10) + 100] = 0
     X[1000:, 2 * np.arange(10)] = 0
-    X_sparse = csc_matrix(X)
+    X_sparse = SP(X)
     Y = np.abs(rng.randn(150, 10))
     model = CMF(n_components=10, solver=solver,
                 random_state=42)
@@ -69,7 +70,7 @@ def sparse_cmf_with_logits_benchmark():
     X = np.abs(rng.randn(2000, 150))
     X[:1000, 2 * np.arange(10) + 100] = 0
     X[1000:, 2 * np.arange(10)] = 0
-    X_sparse = csc_matrix(X)
+    X_sparse = SP(X)
     Y = expit(rng.randn(150, 10))
     model = CMF(n_components=10, solver="newton",
                 random_state=42)

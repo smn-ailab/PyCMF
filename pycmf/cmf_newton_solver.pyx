@@ -1,4 +1,5 @@
 # cython: linetrace=True
+# cython: profile=True
 
 cimport numpy as np
 cimport cython
@@ -142,6 +143,7 @@ def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
           &beta, &c[0], &ldc)
     return _c
 
+
 @cython.binding(True)
 def _residual(np.ndarray[DTYPE_t, ndim=1] left,
               np.ndarray[DTYPE_t, ndim=2] right,
@@ -160,10 +162,22 @@ def _residual(np.ndarray[DTYPE_t, ndim=1] left,
         >>> B[:, 0].shape
         (2, 1)
     """
+    cdef Py_ssize_t i
+    cdef double v
+    cdef bint is_csr
+
     estimate = matmul(left.reshape((1, -1)), right).flatten()
     estimate = inverse(estimate, link)
     if should_flatten:
-        return estimate - target.toarray().flatten()
+        is_csr = target.getformat() == "csr"
+        if not is_csr:
+            target = target.tocsr()
+            is_csr = True
+        # we assume that sp_arr is a 1 x d matrix
+        # this allows us to ignore the row pointers
+        for (i, v) in zip(target.indices, target.data):
+            estimate[i] -= v
+        return estimate
     else:
         return estimate - target
 
@@ -180,7 +194,7 @@ def _newton_update_U(np.ndarray[DTYPE_t, ndim=2] U,
     precompute_dU = sg_sample_ratio == 1.
     if precompute_dU:
         # dU is constant across samples
-        res_X = inverse(np.dot(U, V.T), link) - X #SLOW: 35%
+        res_X = inverse(np.dot(U, V.T), link) - X
         dU_full = alpha * np.dot(res_X, V) + l1_reg * np.sign(U) + l2_reg * U
         if issparse(dU_full):
             dU_full = dU_full.toarray()
@@ -198,10 +212,9 @@ def _newton_update_U(np.ndarray[DTYPE_t, ndim=2] U,
     res_X_should_flatten = issparse(X)
     for i in range(U.shape[0]):
         u_i = U[i, :]
-        V_T_sampled, X_sampled = _stochastic_sample(V.T, X, sg_sample_ratio, 1) #SLOW: 9.4%
+        V_T_sampled, X_sampled = _stochastic_sample(V.T, X, sg_sample_ratio, 1)
         if precompute_dU:
             dU = dU_full[i, :]
-            # assert(np.ndim(dU) == 1)
         else:
             res_X = _residual(u_i, V_T_sampled, X_sampled[i, :], link, res_X_should_flatten)
             dU = alpha * np.dot(res_X, V_T_sampled.T) + l1_reg * np.sign(u_i) + l2_reg * u_i
@@ -243,7 +256,7 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
 
         U_sampled, X_sampled = _stochastic_sample(U, X, sg_sample_ratio, 0)
         assert(np.ndim(v_i) == 1)
-        res_X = _residual(v_i, U_sampled.T, X_sampled[:, i].T, x_link, res_X_should_flatten).T
+        res_X = _residual(v_i, U_sampled.T, X_sampled[:, i], x_link, res_X_should_flatten).T
 
         Z_T_sampled, Y_sampled = _stochastic_sample(Z.T, Y, sg_sample_ratio, 1)
         res_Y = _residual(v_i, Z_T_sampled, Y_sampled[i, :], y_link, res_Y_should_flatten)
@@ -289,7 +302,7 @@ def _newton_update_Z(np.ndarray[DTYPE_t, ndim=2] Z,
         z_i = Z[i, :]
 
         V_sampled, Y_sampled = _stochastic_sample(V, Y, sg_sample_ratio, 0)
-        res_Y = _residual(z_i, V_sampled.T, Y_sampled[:, i].T, link, res_Y_should_flatten).T
+        res_Y = _residual(z_i, V_sampled.T, Y_sampled[:, i], link, res_Y_should_flatten).T
 
         dZ = (1 - alpha) * np.dot(res_Y.T, V_sampled) + \
             l1_reg * np.sign(z_i) + l2_reg * z_i
@@ -299,9 +312,9 @@ def _newton_update_Z(np.ndarray[DTYPE_t, ndim=2] Z,
                                    l2_reg * np.eye(Z.shape[1]),
                                    hessian_pertubation)
         elif link == "logit":
-            D = np.diag(d_sigmoid(np.dot(V_sampled, z_i.T))) #SLOW: 10.2%
-            ddZ_inv = _safe_invert((1 - alpha) * np.dot(np.dot(V_sampled.T, D), V_sampled) + #SLOW: 16.%
+            D = np.diag(d_sigmoid(np.dot(V_sampled, z_i.T)))
+            ddZ_inv = _safe_invert((1 - alpha) * np.dot(np.dot(V_sampled.T, D), V_sampled) +
                                    l2_reg * np.eye(Z.shape[1]),
-                                   hessian_pertubation) #SLOW: 50.7%
+                                   hessian_pertubation)
 
         _row_newton_update_fast(Z, i, dZ, ddZ_inv, 1., non_negative)

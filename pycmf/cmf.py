@@ -2,9 +2,8 @@ from __future__ import division, print_function
 from math import sqrt
 import warnings
 import numbers
-
 import numpy as np
-
+import scipy.sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_random_state, check_array
 from sklearn.utils.extmath import randomized_svd, squared_norm
@@ -113,7 +112,7 @@ def _initialize_mf(M, n_components, init=None, eps=1e-6, random_state=None, non_
         if non_negative:
             raise ValueError('SVD initialization incompatible with NMF (use nndsvd instead)')
         if min(n_samples, n_features) < n_components:
-            warnings.warn('The number of components is smaller than the rank in svd initialization.' + 
+            warnings.warn('The number of components is smaller than the rank in svd initialization.' +
                          'The input will be padded with zeros to compensate for the lack of singular values.')
         # simple SVD based approximation
         U, S, V = randomized_svd(M, n_components, random_state=random_state)
@@ -129,7 +128,7 @@ def _initialize_mf(M, n_components, init=None, eps=1e-6, random_state=None, non_
             S_padded = np.zeros(n_components)
             S_padded[:S.shape[0]] = S
             S = S_padded
-            
+
         S = np.diag(np.sqrt(S))
         A = np.dot(U, S)
         B = np.dot(S, V)
@@ -407,6 +406,13 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
         solver_object = MUSolver(max_iter=max_iter, tol=tol, verbose=verbose,
                                  l1_reg=l1_reg, l2_reg=l2_reg, beta_loss=beta_loss, random_state=random_state)
     elif solver == "newton":
+        if sp.issparse(X) and X.getformat() != "csr":
+            warnings.warn("X is sparse but not in csr format. " +
+                          "This will cause significant slow down for the Newton solver.")
+        if sp.issparse(Y) and Y.getformat() != "csr":
+            warnings.warn("Y is sparse but not in csr format. " +
+                          "This will cause significant slow down for the Newton solver.")
+
         if alpha == "auto":
             # adjust alpha so that both X and Y are "equally" considered,
             # i.e. X.shape[0] * alpha = Y.shape[1] * (1 - alpha)
@@ -685,11 +691,11 @@ class CMF(BaseEstimator, TransformerMixin):
         """
         self.fit_transform(X, Y, **params)
         return self
-    
+
     def print_topic_terms(self, vectorizer, topn_words=10, importances=True):
         """For interpreting the results when using CMF for labeled topic modeling.
         Prints out the topics acquired along with the words included.
-        
+
         Parameters
         ----------
         vectorizer : {sklearn.VectorizerMixin}
@@ -701,7 +707,7 @@ class CMF(BaseEstimator, TransformerMixin):
         topn_words : int, default: 10
             Number of words to display per topic
             (words are chosen in order of weight within topic)
-        
+
         importances : bool, default: True
             Whether to print the importances along with the topics.
         """
@@ -714,7 +720,7 @@ class CMF(BaseEstimator, TransformerMixin):
             _print_topic_terms_from_matrix(
                 self.x_weights, idx_to_word,
                 topn_words=topn_words)
-            
+
 if __name__ == '__main__':
     rng = np.random.mtrand.RandomState(42)
     X = np.abs(rng.randn(20, 15))
