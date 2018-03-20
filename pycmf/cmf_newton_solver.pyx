@@ -111,8 +111,8 @@ def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
         DTYPE_t alpha=1., DTYPE_t beta=0.):
     """Based on https://gist.github.com/JonathanRaiman/07046b897709fffb49e5"""
     cdef int m, n, k, lda, ldb, ldc
-    assert(PyArray_IS_F_CONTIGUOUS](_a))
-    assert(PyArray_IS_F_CONTIGUOUS](_b))
+    assert(PyArray_IS_F_CONTIGUOUS(_a))
+    assert(PyArray_IS_F_CONTIGUOUS(_b))
     cdef char * transA_char = "T" if transA else "N"
     cdef char * transB_char = "T" if transB else "N"
     cdef DTYPE_t * a
