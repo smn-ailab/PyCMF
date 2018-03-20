@@ -105,18 +105,14 @@ cdef sgemm_ptr sgemm=<sgemm_ptr>PyCapsule_GetPointer(fblas.sgemm._cpointer, NULL
 cdef dgemm_ptr dgemm=<dgemm_ptr>PyCapsule_GetPointer(fblas.dgemm._cpointer, NULL)
 
 @cython.binding(True)
-@cython.boundscheck(True)
+@cython.boundscheck(False)
 def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
         bint transA=False, bint transB=False,
         DTYPE_t alpha=1., DTYPE_t beta=0.):
     """Based on https://gist.github.com/JonathanRaiman/07046b897709fffb49e5"""
     cdef int m, n, k, lda, ldb, ldc
-    if not PyArray_IS_F_CONTIGUOUS(_a):
-      _a = _a.T
-      transA = not transA
-    if not PyArray_IS_F_CONTIGUOUS(_b):
-      _b = _b.T
-      transB = not transB
+    assert(PyArray_IS_F_CONTIGUOUS](_a))
+    assert(PyArray_IS_F_CONTIGUOUS](_b))
     cdef char * transA_char = "T" if transA else "N"
     cdef char * transB_char = "T" if transB else "N"
     cdef DTYPE_t * a
@@ -124,11 +120,11 @@ def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
     cdef DTYPE_t * c
 
     if transA:
-      m = _a.shape[1]
-      k = _a.shape[0] # k is the shared dimension
+        m = _a.shape[1]
+        k = _a.shape[0] # k is the shared dimension
     else:
-      m = _a.shape[0]
-      k = _a.shape[1]
+        m = _a.shape[0]
+        k = _a.shape[1]
     n = _b.shape[0 if transB else 1]
 
     cdef np.ndarray[DTYPE_t, ndim=2] _c = np.zeros((m,n), dtype=DTYPE, order="F")
@@ -169,10 +165,9 @@ def _residual(np.ndarray[DTYPE_t, ndim=1] left,
     estimate = matmul(left.reshape((1, -1)), right).flatten()
     estimate = inverse(estimate, link)
     if should_flatten:
-        is_csr = target.getformat() == "csr"
-        if not is_csr:
+        # return estimate - target.toarray().flatten()
+        if not target.getformat() == "csr":
             target = target.tocsr()
-            is_csr = True
         # we assume that sp_arr is a 1 x d matrix
         # this allows us to ignore the row pointers
         for (i, v) in zip(target.indices, target.data):
@@ -182,13 +177,13 @@ def _residual(np.ndarray[DTYPE_t, ndim=1] left,
         return estimate - target
 
 @cython.binding(True)
-def _newton_update_U(np.ndarray[DTYPE_t, ndim=2] U,
-                     np.ndarray[DTYPE_t, ndim=2] V,
-                     X, double alpha,
-                     double l1_reg, double l2_reg,
-                     str link, bint non_negative,
-                     double sg_sample_ratio,
-                     double hessian_pertubation):
+def _newton_update_left(np.ndarray[DTYPE_t, ndim=2] U,
+                        np.ndarray[DTYPE_t, ndim=2] V,
+                        X, double alpha,
+                        double l1_reg, double l2_reg,
+                        str link, bint non_negative,
+                        double sg_sample_ratio,
+                        double hessian_pertubation):
     cdef int i
 
     precompute_dU = sg_sample_ratio == 1.
@@ -212,6 +207,8 @@ def _newton_update_U(np.ndarray[DTYPE_t, ndim=2] U,
     res_X_should_flatten = issparse(X)
     for i in range(U.shape[0]):
         u_i = U[i, :]
+        # TODO: Fix sampling procedure to take memory order into account and be much faster
+        # That being said, sampling column-wise for X is super slow, so some precomputation might be necessary
         V_T_sampled, X_sampled = _stochastic_sample(V.T, X, sg_sample_ratio, 1)
         if precompute_dU:
             dU = dU_full[i, :]
@@ -230,6 +227,7 @@ def _newton_update_U(np.ndarray[DTYPE_t, ndim=2] U,
                                        hessian_pertubation)
 
         _row_newton_update_fast(U, i, dU, ddU_inv, 1., non_negative)
+
 
 @cython.binding(True)
 def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
@@ -255,14 +253,13 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
         v_i = V[i, :]
 
         U_sampled, X_sampled = _stochastic_sample(U, X, sg_sample_ratio, 0)
-        assert(np.ndim(v_i) == 1)
-        res_X = _residual(v_i, U_sampled.T, X_sampled[:, i], x_link, res_X_should_flatten).T
+        res_X_T = _residual(v_i, U_sampled.T, X_sampled[:, i], x_link, res_X_should_flatten)
 
-        Z_T_sampled, Y_sampled = _stochastic_sample(Z.T, Y, sg_sample_ratio, 1)
-        res_Y = _residual(v_i, Z_T_sampled, Y_sampled[i, :], y_link, res_Y_should_flatten)
+        Z_sampled, Y_sampled = _stochastic_sample(Z, Y, sg_sample_ratio, 0)
+        res_Y_T = _residual(v_i, Z_sampled.T, Y_sampled[:, i], y_link, res_Y_should_flatten)
 
-        dV = alpha * np.dot(res_X.T, U_sampled) + \
-            (1 - alpha) * np.dot(res_Y, Z_T_sampled.T) + \
+        dV = alpha * np.dot(res_X_T, U_sampled) + \
+            (1 - alpha) * np.dot(res_Y_T, Z_sampled) + \
             l1_reg * np.sign(v_i) + l2_reg * v_i
 
         if not precompute_ddV_inv:
@@ -275,10 +272,10 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
             if y_link == "logit":
                 # in the original paper, the equation was v_i.T @ Z,
                 # which clearly does not work due to the dimensionality
-                D_z = np.diag(d_sigmoid(np.dot(v_i, Z_T_sampled)))
-                ddV_wrt_Z = np.dot(np.dot(Z_T_sampled, D_z), Z_T_sampled.T)
+                D_z = np.diag(d_sigmoid(np.dot(Z_sampled, v_i.T)))
+                ddV_wrt_Z = np.dot(np.dot(Z_sampled.T, D_z), Z_sampled)
             elif y_link == "linear":
-                ddV_wrt_Z = np.dot(Z_T_sampled, Z_T_sampled.T)
+                ddV_wrt_Z = np.dot(Z_sampled.T, Z_sampled)
 
             ddV_inv = _safe_invert(alpha * ddV_wrt_U +
                                    (1 - alpha) * ddV_wrt_Z +
@@ -286,35 +283,3 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
                                    hessian_pertubation)
 
         _row_newton_update_fast(V, i, dV, ddV_inv, 1., non_negative)
-
-@cython.binding(True)
-def _newton_update_Z(np.ndarray[DTYPE_t, ndim=2] Z,
-                     np.ndarray[DTYPE_t, ndim=2] V,
-                     Y, double alpha, double l1_reg,
-                     double l2_reg, str link,
-                     bint non_negative,
-                     double sg_sample_ratio,
-                     double hessian_pertubation):
-    cdef int i
-
-    res_Y_should_flatten = issparse(Y)
-    for i in range(Z.shape[0]):
-        z_i = Z[i, :]
-
-        V_sampled, Y_sampled = _stochastic_sample(V, Y, sg_sample_ratio, 0)
-        res_Y = _residual(z_i, V_sampled.T, Y_sampled[:, i], link, res_Y_should_flatten).T
-
-        dZ = (1 - alpha) * np.dot(res_Y.T, V_sampled) + \
-            l1_reg * np.sign(z_i) + l2_reg * z_i
-
-        if link == "linear":
-            ddZ_inv = _safe_invert((1 - alpha) * np.dot(V_sampled.T, V_sampled) +
-                                   l2_reg * np.eye(Z.shape[1]),
-                                   hessian_pertubation)
-        elif link == "logit":
-            D = np.diag(d_sigmoid(np.dot(V_sampled, z_i.T)))
-            ddZ_inv = _safe_invert((1 - alpha) * np.dot(np.dot(V_sampled.T, D), V_sampled) +
-                                   l2_reg * np.eye(Z.shape[1]),
-                                   hessian_pertubation)
-
-        _row_newton_update_fast(Z, i, dZ, ddZ_inv, 1., non_negative)

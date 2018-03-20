@@ -12,11 +12,11 @@ from scipy.special import expit
 from scipy.sparse import issparse
 
 try:
-    from .cmf_newton_solver import _newton_update_U, _newton_update_V, _newton_update_Z
+    from .cmf_newton_solver import _newton_update_left, _newton_update_V
     USE_CYTHON = True
 except ModuleNotFoundError:
     warnings.warn("Cython extensions not found, defaulting to slow python implementation")
-    USE_CYTHON = False
+USE_CYTHON = False
 EPSILON = np.finfo(np.float32).eps
 
 INTEGER_TYPES = (numbers.Integral, np.integer)
@@ -31,7 +31,7 @@ def d_sigmoid(M):
     return sgm * (1 - sgm)
 
 
-def inverse(x, link):    
+def inverse(x, link):
     if link == "linear":
         return x
     elif link == "logit":
@@ -104,7 +104,7 @@ class _IterativeCMFSolver:
                  l1_reg=0, l2_reg=0, alpha=0.5,
                  update_H=True, verbose=0,
                  U_non_negative=True, V_non_negative=True, Z_non_negative=True,
-                 x_link="linear", y_link="linear", hessian_pertubation=0.2, 
+                 x_link="linear", y_link="linear", hessian_pertubation=0.2,
                  sg_sample_ratio=1., random_state=None):
         self.max_iter = max_iter
         self.tol = tol
@@ -127,6 +127,10 @@ class _IterativeCMFSolver:
     def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
         """A single update step for all the matrices in the factorization."""
         raise NotImplementedError("Implement in concrete subclass to use")
+
+    def compute_error(self, X, Y, U, V, Z):
+        return self.alpha * compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss) + \
+               (1 - self.alpha) * compute_factorization_error(Y, V, Z.T, self.y_link, self.beta_loss)
 
     def fit_iterative_update(self, X, Y, U, V, Z):
         """Compute CNMF with iterative methods.
@@ -164,8 +168,7 @@ class _IterativeCMFSolver:
         start_time = time.time()
         # TODO: handle beta loss other than fnorm
 
-        previous_error = error_at_init = self.alpha * compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss) + \
-                                        (1 - self.alpha) * compute_factorization_error(Y, V, Z.T, self.y_link, self.beta_loss)
+        previous_error = error_at_init = self.compute_error(X, Y, U, V, Z)
 
         for n_iter in range(1, self.max_iter + 1):
 
@@ -173,8 +176,7 @@ class _IterativeCMFSolver:
 
             # test convergence criterion every 10 iterations
             if self.tol > 0 and n_iter % 10 == 0:
-                error = self.alpha *  compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss) + \
-                        (1 - self.alpha ) * compute_factorization_error(Y, V, Z.T, self.y_link, self.beta_loss)
+                error = self.compute_error(X, Y, U, V, Z)
 
                 if self.verbose:
                     iter_time = time.time()
@@ -264,20 +266,36 @@ class MUSolver(_IterativeCMFSolver):
 if USE_CYTHON:
     class NewtonSolver(_IterativeCMFSolver):
         """Internal solver that solves using the Newton-Raphson method."""
+        def fit_iterative_update(self, X, Y, U, V, Z):
+            # handle memory ordering and format issues for speed up
+            X_ = X.tocsr() if issparse(X) else np.ascontiguousarray(X)
+            Y_ = Y.T.tocsr() if issparse(Y) else np.ascontiguousarray(Y.T)
+
+            # U, V, Z must be C-ordered for cython dot product to work
+            U = np.ascontiguousarray(U)
+            V = np.ascontiguousarray(V)
+            Z = np.ascontiguousarray(Z)
+            return super().fit_iterative_update(X_, Y_, U, V, Z)
+
         def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
-            _newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
-                             self.x_link, self.U_non_negative,
-                             1., # for U, non sampling is faster
-                             self.hessian_pertubation)
-            _newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
-                             self.y_link, self.Z_non_negative,
-                             self.sg_sample_ratio,
-                             self.hessian_pertubation)
+            _newton_update_left(U, V, X, alpha, l1_reg, l2_reg,
+                                self.x_link, self.U_non_negative,
+                                1.,  # currently, non sampling is faster
+                                self.hessian_pertubation)
+            _newton_update_left(Z, V, Y, 1 - alpha, l1_reg, l2_reg,
+                                self.y_link, self.Z_non_negative,
+                                1.,  # currently, non sampling is faster
+                                self.hessian_pertubation)
             _newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
-                             self.x_link, self.y_link, 
+                             self.x_link, self.y_link,
                              self.V_non_negative,
                              self.sg_sample_ratio,
                              self.hessian_pertubation)
+
+        def compute_error(self, X, Y, U, V, Z):
+            return self.alpha * compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss) + \
+                   (1 - self.alpha) * compute_factorization_error(Y, Z, V.T, self.y_link, self.beta_loss)
+
 else:
     class NewtonSolver(_IterativeCMFSolver):
         @classmethod
@@ -286,7 +304,7 @@ else:
             M[idx, :] = M[idx, :] - eta * np.dot(dM, ddM_inv)
             if non_negative:
                 M[idx, :][M[idx, :] < 0] = 0.
-                
+
         def _stochastic_sample(self, features, target, axis=0):
             assert(features.shape[axis] == target.shape[axis])
             if self.sg_sample_ratio < 1.:
@@ -339,7 +357,7 @@ else:
             e.g.
                 >>> import numpy as np; from scipy.sparse import csc_matrix
                 >>> A = np.array([[1, 2, 3], [4, 5, 6]])
-                >>> B = csc_matrix(A) 
+                >>> B = csc_matrix(A)
                 >>> A[:, 0].shape
                 (2,)
                 >>> B[:, 0].shape
