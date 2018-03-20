@@ -3,8 +3,15 @@ from Cython.Distutils import build_ext
 from distutils.extension import Extension
 import numpy
 
+# options for enabling cython profiling
+from Cython.Compiler.Options import get_directive_defaults
+directive_defaults = get_directive_defaults()
+directive_defaults['linetrace'] = True
+directive_defaults['binding'] = True
+
 extensions = [
-    Extension("pycmf.cmf_newton_solver", ["pycmf/cmf_newton_solver.pyx"])
+    Extension("cmf_newton_solver", ["pycmf/cmf_newton_solver.pyx"],
+              define_macros=[('CYTHON_TRACE', '1')])
 ]
 
 setup(
