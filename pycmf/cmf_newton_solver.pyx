@@ -31,6 +31,51 @@ def inverse(x, link):
     else:
         raise ValueError("Invalid link function {}".format(link))
 
+# utility classes
+class Pseudocsr_row:
+    """For computing the residual"""
+    __slots__ = ["data", "indices"]
+    def __init__(self, data, indices):
+        self.data = data
+        self.indices = indices
+
+    def getformat(self):
+        return "csr"
+
+class SampledSparseMatrix:
+    """A wrapper that acts as a sample of the sparse matrix but
+       prevents copying of original matrix"""
+    def __init__(self, matrix, sample_mask, sample_axis):
+        self.matrix = matrix
+        assert(sample_axis in (0, 1))
+        self.sample_axis = sample_axis
+        if sample_axis == 0:
+            self.sample_mask = sample_mask
+        else:
+            # convert to dict for O(1) lookup later
+            self.sample_mask = {v: i for i, v in enumerate(sample_mask)}
+
+    def __getitem__(self, idx):
+        cdef int i
+        cdef DTYPE_t v
+        x, y = idx
+        if isinstance(x, int):
+            assert(self.sample_axis == 1)
+            assert(y == slice(None))
+            data, indices = [], []
+            for i, v in zip(self.matrix[x].indices, self.matrix[x].data):
+                if i in self.sample_mask:
+                    data.append(v)
+                    indices.append(self.sample_mask[i])
+            return Pseudocsr_row(data, indices)
+        elif isinstance(y, int):
+            assert(self.sample_axis == 0)
+            assert(x == slice(None))
+            return self.matrix[self.sample_mask, y]
+        else:
+            raise ValueError("Invalid index into sampled sparse matrix")
+
+# solver functions
 @cython.binding(True)
 cdef void _row_newton_update_fast(np.ndarray[DTYPE_t, ndim=2] M,
                                   Py_ssize_t idx,
@@ -50,14 +95,20 @@ def _stochastic_sample(np.ndarray[DTYPE_t, ndim=2] features,
     if ratio < 1.:
         sample_size = int(features.shape[axis] * ratio)
         sample_mask = np.random.permutation(np.arange(features.shape[axis]))[:sample_size]
+        target_is_sparse = issparse(target)
         if axis == 0:
             features_sampled = features[sample_mask, :]
-            target_sampled = target[sample_mask, :]
+            if not target_is_sparse:
+                target_sampled = target[sample_mask, :]
         elif axis == 1:
             features_sampled = features[:, sample_mask]
-            target_sampled = target[:, sample_mask]
+            if not target_is_sparse:
+                target_sampled = target[:, sample_mask]
         else:
             raise ValueError("Axis {} out of bounds".format(axis))
+
+        if target_is_sparse:
+            target_sampled = SampledSparseMatrix(target, sample_mask, axis)
     else:
         features_sampled = features
         target_sampled = target
@@ -213,7 +264,8 @@ def _newton_update_left(np.ndarray[DTYPE_t, ndim=2] U,
         if precompute_dU:
             dU = dU_full[i, :]
         else:
-            res_X = _residual(u_i, V_T_sampled, X_sampled[i, :], link, res_X_should_flatten)
+            x_i = X_sampled[i, :]
+            res_X = _residual(u_i, V_T_sampled, x_i, link, res_X_should_flatten)
             dU = alpha * np.dot(res_X, V_T_sampled.T) + l1_reg * np.sign(u_i) + l2_reg * u_i
 
         if not precompute_ddU_inv:
