@@ -14,3 +14,7 @@ inplace:
 install: clean
 	$(PYTHON) setup.py install
 	pytest
+
+dev: clean
+	$(PYTHON) setup_dev.py install
+	pytest
