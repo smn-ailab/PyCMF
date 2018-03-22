@@ -280,11 +280,11 @@ if USE_CYTHON:
         def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
             _newton_update_left(U, V, X, alpha, l1_reg, l2_reg,
                                 self.x_link, self.U_non_negative,
-                                1.,  # currently, non sampling is faster
+                                self.sg_sample_ratio,
                                 self.hessian_pertubation)
             _newton_update_left(Z, V, Y, 1 - alpha, l1_reg, l2_reg,
                                 self.y_link, self.Z_non_negative,
-                                1.,  # currently, non sampling is faster
+                                self.sg_sample_ratio,
                                 self.hessian_pertubation)
             _newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
                              self.x_link, self.y_link,
