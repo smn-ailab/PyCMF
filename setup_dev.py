@@ -10,7 +10,7 @@ directive_defaults['linetrace'] = True
 directive_defaults['binding'] = True
 
 extensions = [
-    Extension("cmf_newton_solver", ["pycmf/cmf_newton_solver.pyx"],
+    Extension("pycmf.cmf_newton_solver", ["pycmf/cmf_newton_solver.pyx"],
               define_macros=[('CYTHON_TRACE', '1')])
 ]
 

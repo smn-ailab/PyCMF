@@ -302,17 +302,18 @@ def test_stochastic_newton_solver():
     assert_less(model.fit(X, Y).reconstruction_err_, 0.1)
 
 
-@ignore_warnings(category=UserWarning)
-def test_svd_ncomponents_lt_nfeatures():
-    # smoke test for input where a dimension is 1
+def test_stochastic_newton_solver_sparse_input_close():
     rng = np.random.mtrand.RandomState(42)
 
-    model = CMF(n_components=3, solver="newton", x_init='svd', y_init='svd',
-                U_non_negative=False, V_non_negative=False, Z_non_negative=False,
-                random_state=0, max_iter=1)
-    X = rng.randn(6, 4)
-    Y = rng.randn(4, 2)
-    model.fit(X, Y)
+    model = CMF(n_components=5, solver="newton", x_init='svd', y_init='svd',
+                U_non_negative=False, V_non_negative=False, Z_non_negative=False, alpha=0.5,
+                sg_sample_ratio=0.5, random_state=0, max_iter=1000)
+    A = rng.randn(6, 5)
+    B = rng.randn(5, 6)
+    A_sparse = csr_matrix(A)
+    B_sparse = csr_matrix(B)
+
+    assert_less(model.fit(A_sparse, B_sparse).reconstruction_err_, 0.1)
 
 
 def test_stochastic_newton_solver_sparse_input():
@@ -335,6 +336,19 @@ def test_stochastic_newton_solver_sparse_input():
     assert_array_almost_equal(U1, U2)
     assert_array_almost_equal(V1, V2)
     assert_array_almost_equal(Z1, Z2)
+
+
+@ignore_warnings(category=UserWarning)
+def test_svd_ncomponents_lt_nfeatures():
+    # smoke test for input where a dimension is 1
+    rng = np.random.mtrand.RandomState(42)
+
+    model = CMF(n_components=3, solver="newton", x_init='svd', y_init='svd',
+                U_non_negative=False, V_non_negative=False, Z_non_negative=False,
+                random_state=0, max_iter=1)
+    X = rng.randn(6, 4)
+    Y = rng.randn(4, 2)
+    model.fit(X, Y)
 
 
 def test_auto_compute_alpha():

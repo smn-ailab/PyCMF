@@ -3,6 +3,7 @@ from scipy.sparse import csr_matrix
 from scipy.special import expit
 import timeit
 from pycmf import CMF
+
 import argparse
 parser = argparse.ArgumentParser(description='Benchmark CMF')
 parser.add_argument('--runs', '-r', type=int, default=1,
@@ -40,7 +41,7 @@ def dense_cmf_benchmark(solver):
     X = np.abs(rng.randn(2000, 150))
     Y = np.abs(rng.randn(150, 10))
     model = CMF(n_components=10, solver=solver,
-                random_state=42)
+                random_state=42, max_iter=10)
     U, V, Z = model.fit_transform(X, Y)
 
 
@@ -49,7 +50,7 @@ def dense_cmf_with_logits_benchmark():
     X = np.abs(rng.randn(2000, 150))
     Y = np.abs(rng.randn(150, 10))
     model = CMF(n_components=10, solver="newton",
-                random_state=42)
+                random_state=42, max_iter=10)
     U, V, Z = model.fit_transform(X, Y)
 
 
@@ -61,11 +62,11 @@ def sparse_cmf_benchmark(solver):
     X_sparse = SP(X)
     Y = np.abs(rng.randn(150, 10))
     model = CMF(n_components=10, solver=solver,
-                random_state=42)
+                random_state=42, max_iter=10)
     U, V, Z = model.fit_transform(X_sparse, Y)
 
 
-def sparse_cmf_with_logits_benchmark():
+def sparse_cmf_with_logits_benchmark(sample_ratio):
     rng = np.random.mtrand.RandomState(42)
     X = np.abs(rng.randn(2000, 150))
     X[:1000, 2 * np.arange(10) + 100] = 0
@@ -73,7 +74,8 @@ def sparse_cmf_with_logits_benchmark():
     X_sparse = SP(X)
     Y = expit(rng.randn(150, 10))
     model = CMF(n_components=10, solver="newton",
-                random_state=42)
+                random_state=42, sg_sample_ratio=sample_ratio,
+                max_iter=10)
     U, V, Z = model.fit_transform(X_sparse, Y)
 
 
@@ -81,11 +83,17 @@ if __name__ == "__main__":
     print("=" * 75)
     print("Commencing benchmark...")
     for solver in ["mu", "newton"]:
-        BenchmarkCase(f"Dense CMF, {solver}", "dense_cmf_benchmark",
+        BenchmarkCase(f"Dense CMF, {solver}",
+                      "dense_cmf_benchmark",
                       arguments=f"'{solver}'").run()
-    BenchmarkCase(f"Dense CMF with logits", "dense_cmf_with_logits_benchmark").run()
+    BenchmarkCase(f"Dense CMF with logits",
+                  "dense_cmf_with_logits_benchmark").run()
     for solver in ["mu", "newton"]:
-        BenchmarkCase(f"Sparse CMF, {solver}", "sparse_cmf_benchmark",
+        BenchmarkCase(f"Sparse CMF, {solver}",
+                      "sparse_cmf_benchmark",
                       arguments=f"'{solver}'").run()
-    BenchmarkCase(f"Sparse CMF with logits", "sparse_cmf_with_logits_benchmark").run()
+    for ratio in [1., 0.2]:
+        BenchmarkCase(f"Sparse CMF with logits, ratio={ratio}",
+                      "sparse_cmf_with_logits_benchmark",
+                      arguments=f"{ratio}").run()
     print("=" * 75)
