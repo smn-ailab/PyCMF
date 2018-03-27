@@ -16,7 +16,7 @@ try:
     USE_CYTHON = True
 except ModuleNotFoundError:
     warnings.warn("Cython extensions not found, defaulting to slow python implementation")
-USE_CYTHON = False
+    USE_CYTHON = False
 EPSILON = np.finfo(np.float32).eps
 
 INTEGER_TYPES = (numbers.Integral, np.integer)
