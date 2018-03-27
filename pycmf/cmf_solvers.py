@@ -6,7 +6,6 @@ import scipy
 import warnings
 
 from sklearn.utils.extmath import safe_sparse_dot
-from sklearn.exceptions import ConvergenceWarning
 from sklearn.decomposition.nmf import _beta_divergence, _beta_loss_to_float
 from scipy.special import expit
 from scipy.sparse import issparse
@@ -20,6 +19,7 @@ except ModuleNotFoundError:
 EPSILON = np.finfo(np.float32).eps
 
 INTEGER_TYPES = (numbers.Integral, np.integer)
+
 
 # utility functions
 def sigmoid(M):
@@ -133,7 +133,7 @@ class _IterativeCMFSolver:
                (1 - self.alpha) * compute_factorization_error(Y, V, Z.T, self.y_link, self.beta_loss)
 
     def fit_iterative_update(self, X, Y, U, V, Z):
-        """Compute CNMF with iterative methods.
+        """Compute CMF with iterative methods.
         The objective function is minimized with an alternating minimization of U, V
         and Z. Regularly prints error and stops update when improvement stops.
 
@@ -265,10 +265,23 @@ class MUSolver(_IterativeCMFSolver):
 
 if USE_CYTHON:
     class NewtonSolver(_IterativeCMFSolver):
-        """Internal solver that solves using the Newton-Raphson method."""
+        """Internal solver that solves using the Newton-Raphson method.
+        Updates each row independently using a Newton-Raphson step. Can handle various link functions and settings.
+        The gradient and Hessian are computed based on the residual between the target and the estimate.
+        Computing the entire target/estimate can be memory intensive, so the option to compute the residual
+        based on a stochastic sample can be enabled by setting sg_sample_ratio < 1.0.
+
+        References
+        ----------
+        Singh, A. P., & Gordon, G. J. (2008). Relational learning via collective matrix factorization.
+        Proceeding of the 14th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining
+        KDD 08, 650. https://doi.org/10.1145/1401890.1401969
+        """
         def fit_iterative_update(self, X, Y, U, V, Z):
             # handle memory ordering and format issues for speed up
             X_ = X.tocsr() if issparse(X) else np.ascontiguousarray(X)
+            # instead of solving for Y = VZ^T, in order to make access to V continuous
+            # for approximating both X and Y, we will solve Y^T = ZV^T
             Y_ = Y.T.tocsr() if issparse(Y) else np.ascontiguousarray(Y.T)
 
             # U, V, Z must be C-ordered for cython dot product to work
@@ -293,11 +306,13 @@ if USE_CYTHON:
                              self.hessian_pertubation)
 
         def compute_error(self, X, Y, U, V, Z):
+            # override because we are solving for Y^T = ZV^T
             return self.alpha * compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss) + \
                    (1 - self.alpha) * compute_factorization_error(Y, Z, V.T, self.y_link, self.beta_loss)
 
 else:
     class NewtonSolver(_IterativeCMFSolver):
+        """Default implementation when Cython cannot be used."""
         @classmethod
         def _row_newton_update(cls, M, idx, dM, ddM_inv,
                                eta=1., non_negative=True):
@@ -343,7 +358,8 @@ else:
                 elif isinstance(v, np.matrix):
                     v_ = np.asarray(v)
                 else:
-                    raise ValueError("Indexing array returns {} dimensions but is not sparse or a matrix".format(np.ndim(v)))
+                    raise ValueError("Indexing array returns {} dimensions " +
+                                     "but is not sparse or a matrix".format(np.ndim(v)))
                 return v_.flatten()
             else:
                 return v.flatten()
@@ -400,7 +416,8 @@ else:
 
                 if not precompute_ddU_inv:
                     if link == "linear":
-                        ddU_inv = self._safe_invert(alpha * np.dot(V_T_sampled, V_T_sampled.T) + l2_reg * np.eye(U.shape[1]))
+                        ddU_inv = self._safe_invert(alpha * np.dot(V_T_sampled, V_T_sampled.T) +
+                                                    l2_reg * np.eye(U.shape[1]))
                     elif link == "logit":
                         D = np.diag(d_sigmoid(np.dot(u_i, V_T_sampled)))
                         ddU_inv = self._safe_invert(alpha * np.dot(np.dot(V_T_sampled, D), V_T_sampled.T))
@@ -463,10 +480,12 @@ else:
                     l1_reg * np.sign(z_i) + l2_reg * z_i
 
                 if link == "linear":
-                    ddZ_inv = self._safe_invert((1 - alpha) * np.dot(V_sampled.T, V_sampled) + l2_reg * np.eye(Z.shape[1]))
+                    ddZ_inv = self._safe_invert((1 - alpha) * np.dot(V_sampled.T, V_sampled) +
+                                                l2_reg * np.eye(Z.shape[1]))
                 elif link == "logit":
                     D = np.diag(d_sigmoid(np.dot(V_sampled, z_i.T)))
-                    ddZ_inv = self._safe_invert((1 - alpha) * np.dot(np.dot(V_sampled.T, D), V_sampled) + l2_reg * np.eye(Z.shape[1]))
+                    ddZ_inv = self._safe_invert((1 - alpha) * np.dot(np.dot(V_sampled.T, D), V_sampled) +
+                                                l2_reg * np.eye(Z.shape[1]))
 
                 self._row_newton_update(Z, i, dZ, ddZ_inv, non_negative=non_negative)
 

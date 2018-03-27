@@ -1,3 +1,4 @@
+"""Benchmarks cmf under various settings and solvers."""
 import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.special import expit

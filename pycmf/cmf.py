@@ -7,9 +7,8 @@ import scipy.sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_random_state, check_array
 from sklearn.utils.extmath import randomized_svd, squared_norm
-from sklearn.utils.validation import check_is_fitted, check_non_negative
-from sklearn.exceptions import ConvergenceWarning
-from sklearn.decomposition.nmf import _initialize_nmf, _beta_divergence, _check_init
+from sklearn.utils.validation import check_non_negative
+from sklearn.decomposition.nmf import _check_init
 
 # solvers
 from .cmf_solvers import MUSolver, NewtonSolver, compute_factorization_error
@@ -113,7 +112,7 @@ def _initialize_mf(M, n_components, init=None, eps=1e-6, random_state=None, non_
             raise ValueError('SVD initialization incompatible with NMF (use nndsvd instead)')
         if min(n_samples, n_features) < n_components:
             warnings.warn('The number of components is smaller than the rank in svd initialization.' +
-                         'The input will be padded with zeros to compensate for the lack of singular values.')
+                          'The input will be padded with zeros to compensate for the lack of singular values.')
         # simple SVD based approximation
         U, S, V = randomized_svd(M, n_components, random_state=random_state)
         # randomize_svd only returns min(n_components, n_features, n_samples) singular values and vectors
@@ -327,7 +326,10 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
         The pertubation to the Hessian in the newton solver to maintain positive definiteness
 
     sg_sample_ratio: double, default: 1.0
-            The sample ratio for stochastic gradient in newton solver. If 1.0, the gradient is not stochastic.
+        The sample ratio for stochastic gradient in newton solver.
+        If 1.0, the gradient is not stochastic.
+        Warning: Using sg_sample_ratio < 1.0 can currently be extremely slow.
+        It is currently recommended to use sg_sample_ratio = 1.0 whenever possible.
 
     Returns
     -------
@@ -351,10 +353,6 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
     >>> from CMF import collective_matrix_factorization
     >>> U, V, Z, n_iter = collective_matrix_factorization(X, Y, n_components=2, \
         init='random', random_state=0)
-
-    References
-    ----------
-
     """
     if n_components is None:
         n_components = max(X.shape[1], Y.shape[1])
@@ -548,10 +546,14 @@ class CMF(BaseEstimator, TransformerMixin):
             Whether to enforce non-negativity for Z. Only applicable for the newton solver.
 
         x_link: str, default: "linear"
-            One of either "logit" of "linear". The link function for transforming UV^T to approximate X
+            One of either "logit" of "linear". The link function for transforming UV^T to approximate X.
+            If "linear", UV^T will be used to approximate X.
+            If "logit", sigmoid(UV^T) will be used to approximate X.
 
         y_link: str, default: "linear"
             One of either "logit" of "linear". The link function for transforming VZ^T to approximate Y
+            If "linear", VZ^T will be used to approximate Y.
+            If "logit", sigmoid(VZ^T) will be used to approximate Y.
 
         hessian_pertubation: double, default: 0.2
             The pertubation to the Hessian in the newton solver to maintain positive definiteness
@@ -584,7 +586,7 @@ class CMF(BaseEstimator, TransformerMixin):
         Proceeding of the 14th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining
         KDD 08, 650. https://doi.org/10.1145/1401890.1401969
 
-        Wang, Y., Yanchunzhangvueduau, E., & Zhou, B. (n.d.).
+        Wang, Y., Yanchunzhangvueduau, E., & Zhou, B. (2017).
         Semi-supervised collective matrix factorization for topic detection and document clustering.
         """
     def __init__(self, n_components=None, x_init=None, y_init=None, solver='mu', alpha='auto',
@@ -720,6 +722,7 @@ class CMF(BaseEstimator, TransformerMixin):
             _print_topic_terms_from_matrix(
                 self.x_weights, idx_to_word,
                 topn_words=topn_words)
+
 
 if __name__ == '__main__':
     rng = np.random.mtrand.RandomState(42)
