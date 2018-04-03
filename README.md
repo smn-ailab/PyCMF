@@ -38,11 +38,10 @@ PyCMF implements a scikit-learn like interface (full compatibility with scikit-l
 ```
 
 ## Getting Started
-Clone this repository, then run
 ```bash
-$ python setup.py install
+$ pip install git+https://github.com/smn-ailab/PyCMF
 ```
-Numpy, Scikit-learn, and Cython must be installed in advance.
+Numpy and Cython must be installed in advance.
 
 ## Features
 - Support for both dense and sparse matrices
