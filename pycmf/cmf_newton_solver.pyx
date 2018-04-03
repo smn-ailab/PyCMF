@@ -1,5 +1,4 @@
 # cython: linetrace=True
-# cython: profile=True
 
 cimport numpy as np
 cimport cython
@@ -24,6 +23,7 @@ def d_sigmoid(M):
 
 @cython.binding(True)
 def inverse(x, link):
+    """Compute element-wise inverse link function."""
     if link == "linear":
         return x
     elif link == "logit":
@@ -33,7 +33,7 @@ def inverse(x, link):
 
 # utility classes
 class Pseudocsr_row:
-    """For computing the residual"""
+    """Acts as a (1, d) csr_matrix while computing the residual"""
     __slots__ = ["data", "indices"]
     def __init__(self, data, indices):
         self.data = data
@@ -44,7 +44,8 @@ class Pseudocsr_row:
 
 class SampledSparseMatrix:
     """A wrapper that acts as a sample of the sparse matrix but
-       prevents copying of original matrix"""
+       prevents copying of original matrix.
+       For speeding up sampling of large csr_matrices when sg_sample_ratio < 1.0."""
     def __init__(self, matrix, sample_mask, sample_axis):
         self.matrix = matrix
         assert(sample_axis in (0, 1))
@@ -89,6 +90,8 @@ cdef void _row_newton_update_fast(np.ndarray[DTYPE_t, ndim=2] M,
 @cython.binding(True)
 def _stochastic_sample(np.ndarray[DTYPE_t, ndim=2] features,
                        target, double ratio, int axis):
+    """Sample the feature and target matrices for stochastic gradient.
+    Returns original matrices when ratio = 1.0"""
     cdef int sample_size
 
     assert(features.shape[axis] == target.shape[axis])
@@ -116,7 +119,7 @@ def _stochastic_sample(np.ndarray[DTYPE_t, ndim=2] features,
 
 @cython.binding(True)
 def _safe_invert(np.ndarray[DTYPE_t, ndim=2] M, double hessian_pertubation):
-    """Computed according to reccomendations of
+    """Compute inverse of M according to reccomendations of
     http://web.stanford.edu/class/cme304/docs/newton-type-methods.pdf"""
     if issparse(M):
         eigs, V = scipy.sparse.linalg.eigsh(M)
@@ -127,7 +130,7 @@ def _safe_invert(np.ndarray[DTYPE_t, ndim=2] M, double hessian_pertubation):
         eigs[eigs < hessian_pertubation] = hessian_pertubation
     return np.dot(np.dot(V, np.diag(1 / eigs)), V.T)
 
-# substitutions for np.dot written in pure Cython
+# utility functions for computing matrix products
 import scipy
 import scipy.linalg.blas as fblas
 from cpython cimport PyCapsule_GetPointer # PyCObject_AsVoidPtr
@@ -160,9 +163,10 @@ cdef dgemm_ptr dgemm=<dgemm_ptr>PyCapsule_GetPointer(fblas.dgemm._cpointer, NULL
 def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
         bint transA=False, bint transB=False,
         DTYPE_t alpha=1., DTYPE_t beta=0.):
-    """Based on https://gist.github.com/JonathanRaiman/07046b897709fffb49e5"""
+    """Substitution for np.dot that calls BLAS directly for speed up.
+    Based on https://gist.github.com/JonathanRaiman/07046b897709fffb49e5"""
     cdef int m, n, k, lda, ldb, ldc
-    assert(PyArray_IS_F_CONTIGUOUS(_a))
+    assert(PyArray_IS_F_CONTIGUOUS(_a)) # BLAS matmul requires memory to be in Fortran order
     assert(PyArray_IS_F_CONTIGUOUS(_b))
     cdef char * transA_char = "T" if transA else "N"
     cdef char * transB_char = "T" if transB else "N"
@@ -235,6 +239,7 @@ def _newton_update_left(np.ndarray[DTYPE_t, ndim=2] U,
                         str link, bint non_negative,
                         double sg_sample_ratio,
                         double hessian_pertubation):
+    """Updates either U or Z row-wise inplace."""
     cdef int i
 
     precompute_dU = sg_sample_ratio == 1.
@@ -255,11 +260,11 @@ def _newton_update_left(np.ndarray[DTYPE_t, ndim=2] U,
                                l2_reg * np.eye(U.shape[1]),
                                hessian_pertubation)
 
+    # currently, sampling is very slow, partially because resampling is conducted for each row.
+    # randomizing the row update order and resampling every k rows might be slightly faster.
     res_X_should_flatten = issparse(X)
     for i in range(U.shape[0]):
         u_i = U[i, :]
-        # TODO: Fix sampling procedure to take memory order into account and be much faster
-        # That being said, sampling column-wise for X is super slow, so some precomputation might be necessary
         V_T_sampled, X_sampled = _stochastic_sample(V.T, X, sg_sample_ratio, 1)
         if precompute_dU:
             dU = dU_full[i, :]
@@ -290,6 +295,7 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
                      str y_link, bint non_negative,
                      double sg_sample_ratio,
                      double hessian_pertubation):
+    """Updates V row-wise inplace."""
     cdef int i
 
     precompute_ddV_inv = (x_link == "linear" and y_link == "linear" and sg_sample_ratio == 1.)

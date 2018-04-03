@@ -1,3 +1,5 @@
+"""Use in conjunction with line profiler to see what lines are being
+the bottleneck in Cython code for cmf_newton_solver."""
 import pycmf
 from pycmf.cmf_solvers import _newton_update_left, _newton_update_V
 import numpy as np
@@ -35,6 +37,7 @@ U = np.ascontiguousarray(U)
 V = np.ascontiguousarray(V)
 Z = np.ascontiguousarray(Z)
 
+# profile _newton_update_V
 print("Profiling _newton_update_V")
 profile = line_profiler.LineProfiler(_newton_update_V)
 profile.runcall(_newton_update_V, U=U, V=V, Z=Z, X=X, Y=Y,
@@ -42,12 +45,14 @@ profile.runcall(_newton_update_V, U=U, V=V, Z=Z, X=X, Y=Y,
                 x_link="linear", y_link="logit", sg_sample_ratio=args.sample, hessian_pertubation=2.)
 assert_stats(profile, _newton_update_V)
 
+# profile _residual
 print("Profiling _residual")
 profile = line_profiler.LineProfiler(pycmf.cmf_newton_solver._residual)
 profile.runcall(pycmf.cmf_newton_solver._residual,
                 V[0, :], U.T, X[:, 0].T.tocsr(), "logit", True)
 assert_stats(profile, pycmf.cmf_newton_solver._residual)
 
+# profile _newton_update_left
 print("Profiling _newton_update_U")
 profile = line_profiler.LineProfiler(_newton_update_left)
 profile.runcall(_newton_update_left, U=U, V=V, X=X,
@@ -56,6 +61,7 @@ profile.runcall(_newton_update_left, U=U, V=V, X=X,
                 sg_sample_ratio=args.sample, hessian_pertubation=2.)
 assert_stats(profile, _newton_update_left)
 
+# profle _stochastic_sample
 print("Profiling _stochastic_sample")
 profile = line_profiler.LineProfiler(pycmf.cmf_newton_solver._stochastic_sample)
 profile.runcall(pycmf.cmf_newton_solver._stochastic_sample,

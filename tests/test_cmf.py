@@ -364,7 +364,6 @@ def test_auto_compute_alpha():
                            U_non_negative=False, V_non_negative=False, Z_non_negative=False,
                            random_state=0, max_iter=100, alpha="auto")
 
-
     U1, V1, Z1 = x_emphasis_model.fit_transform(X, Y)
     U2, V2, Z2 = y_emphasis_model.fit_transform(X, Y)
 
@@ -396,8 +395,8 @@ def test_analysis():
     model = CMF(n_components=2, solver="newton", max_iter=1)
     c = CountVectorizer()
     X_ = c.fit_transform(["hello world",
-                         "goodbye world",
-                         "hello goodbye"])
+                          "goodbye world",
+                          "hello goodbye"])
     X_ = csr_matrix(X_)
     Y = np.abs(rng.randn(3, 1))
     model.fit_transform(X_.T, Y)
