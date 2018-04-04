@@ -203,6 +203,16 @@ def _initialize_mf(M, n_components, init=None, eps=1e-6, random_state=None, non_
     return A, B.T
 
 
+def _init_custom(A, M, n_components, idx,
+                 non_negative=False, random_state=None):
+    if A is not None:
+        _check_init(A, (M.shape[idx], n_components), "CMF (input {})".format(idx), non_negative)
+        return A
+    else:
+        return _initialize_mf(M, n_components, init="random", random_state=random_state,
+                              non_negative=non_negative)[idx]
+
+
 def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
                                     n_components=None, solver="mu", alpha=0.5,
                                     x_init=None, y_init=None, beta_loss="frobenius",
@@ -392,17 +402,10 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
     # initialize U, V, and Z
     if x_init == 'custom':
         if X is not None:
-            if U is not None:
-                _check_init(U, (X.shape[0], n_components), "CMF (input U)", U_non_negative)
-            else:
-                U, _ = _initialize_mf(X, n_components, init="random", random_state=random_state,
-                                      non_negative=U_non_negative)
-
-            if V is not None:
-                _check_init(V, (X.shape[1], n_components), "CMF (input V)", V_non_negative)
-            else:
-                _, V = _initialize_mf(X, n_components, init="random", random_state=random_state,
-                                      non_negative=V_non_negative)
+            U = _init_custom(U, X, n_components, 0,
+                             non_negative=U_non_negative, random_state=random_state)
+            V = _init_custom(V, X, n_components, 1,
+                             non_negative=V_non_negative, random_state=random_state)
     else:
         x_init = "random" if x_link == "logit" else x_init
         U, V = _initialize_mf(X, n_components, init=x_init, random_state=random_state,
@@ -410,17 +413,10 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
 
     if y_init == 'custom':
         if Y is not None:
-            if V is not None:
-                _check_init(V, (Y.shape[0], n_components), "CMF (input V)", V_non_negative)
-            else:
-                V, _ = _initialize_mf(Y, n_components, init="random", random_state=random_state,
-                                      non_negative=V_non_negative)
-
-            if Z is not None:
-                _check_init(Z, (Y.shape[1], n_components), "CMF (input Z)", Z_non_negative)
-            else:
-                _, Z = _initialize_mf(Y, n_components, init="random", random_state=random_state,
-                                      non_negative=Z_non_negative)
+            V = _init_custom(V, Y, n_components, 0,
+                             non_negative=V_non_negative, random_state=random_state)
+            Z = _init_custom(Z, Y, n_components, 1,
+                             non_negative=Z_non_negative, random_state=random_state)
         V_ = V
     else:
         y_init = "random" if y_link == "logit" else y_init
@@ -729,7 +725,9 @@ class CMF(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X, Y):
-        """Fit on X/Y while keeping components matrix (V) constant."""
+        """Fit on X/Y while keeping components matrix (V) constant.
+        If only fitting on either X or Y, set the other to None.
+        """
         assert(hasattr(self, "components"))
         update_U = X is not None
         update_Z = Y is not None
@@ -737,8 +735,8 @@ class CMF(BaseEstimator, TransformerMixin):
         U = None if update_U else self.x_weights
         Z = None if update_Z else self.y_weights
         U, V, Z, n_iter_ = collective_matrix_factorization(
-            X=X, Y=Y, U=U, V=self.components, Z=Z, n_components=self.n_components,
-            x_init="custom", y_init="custom",
+            X=X, Y=Y, U=U, V=self.components, Z=Z,
+            n_components=self.n_components, x_init="custom", y_init="custom",
             solver=self.solver, alpha=alpha, beta_loss=self.beta_loss,
             tol=self.tol, max_iter=self.max_iter, l1_reg=self.l1_reg,
             l2_reg=self.l2_reg, random_state=self.random_state, verbose=self.verbose,
