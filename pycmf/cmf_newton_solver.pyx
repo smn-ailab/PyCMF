@@ -34,10 +34,11 @@ def inverse(x, link):
 # utility classes
 class Pseudocsr_row:
     """Acts as a (1, d) csr_matrix while computing the residual"""
-    __slots__ = ["data", "indices"]
-    def __init__(self, data, indices):
+    __slots__ = ["data", "indices", "shape"]
+    def __init__(self, data, indices, shape):
         self.data = data
         self.indices = indices
+        self.shape = shape
 
     def getformat(self):
         return "csr"
@@ -64,15 +65,16 @@ class SampledSparseMatrix:
             assert(self.sample_axis == 1)
             assert(y == slice(None))
             data, indices = [], []
-            for i, v in zip(self.matrix[x].indices, self.matrix[x].data):
+            row = self.matrix[x]
+            for i, v in zip(row.indices, row.data):
                 if i in self.sample_mask:
                     data.append(v)
                     indices.append(self.sample_mask[i])
-            return Pseudocsr_row(data, indices)
+            return Pseudocsr_row(data, indices, row.shape)
         elif isinstance(y, int):
             assert(self.sample_axis == 0)
             assert(x == slice(None))
-            return self.matrix[self.sample_mask, y]
+            return self.matrix[self.sample_mask, y].T.asformat("csr")
         else:
             raise ValueError("Invalid index into sampled sparse matrix")
 
@@ -98,7 +100,7 @@ def _stochastic_sample(np.ndarray[DTYPE_t, ndim=2] features,
     if ratio < 1.:
         sample_size = int(features.shape[axis] * ratio)
         sample_mask = np.random.permutation(np.arange(features.shape[axis]))[:sample_size]
-        target_is_sparse = issparse(target)
+        target_is_sparse = False #issparse(target)
         if axis == 0:
             features_sampled = features[sample_mask, :]
             if not target_is_sparse:
@@ -198,7 +200,7 @@ def matmul(np.ndarray[DTYPE_t, ndim=2] _a, np.ndarray[DTYPE_t, ndim=2] _b,
 @cython.binding(True)
 def _residual(np.ndarray[DTYPE_t, ndim=1] left,
               np.ndarray[DTYPE_t, ndim=2] right,
-              target, str link, bint should_flatten):
+              target, str link, bint target_is_sparse):
     """Computes residual:
         inverse(left @ right, link) - target
     The number of dimensions of the residual and estimate will be the same.
@@ -219,14 +221,18 @@ def _residual(np.ndarray[DTYPE_t, ndim=1] left,
 
     estimate = matmul(left.reshape((1, -1)), right).flatten()
     estimate = inverse(estimate, link)
-    if should_flatten:
-        # return estimate - target.toarray().flatten()
+    if target_is_sparse:
         if not target.getformat() == "csr":
             target = target.tocsr()
-        # we assume that sp_arr is a 1 x d matrix
-        # this allows us to ignore the row pointers
-        for (i, v) in zip(target.indices, target.data):
-            estimate[i] -= v
+        if target.shape[0] == 1:
+            for i, v in zip(target.indices, target.data):
+                estimate[i] -= v
+        elif target.shape[1] == 1:
+            tgt = target.T.asformat("csr")
+            for i, v in zip(tgt.indices, tgt.data):
+                estimate[i] -= v
+        else:
+            raise ValueError("Target must be 1-d matrix")
         return estimate
     else:
         return estimate - target
@@ -262,7 +268,7 @@ def _newton_update_left(np.ndarray[DTYPE_t, ndim=2] U,
 
     # currently, sampling is very slow, partially because resampling is conducted for each row.
     # randomizing the row update order and resampling every k rows might be slightly faster.
-    res_X_should_flatten = issparse(X)
+    X_is_sparse = issparse(X)
     for i in range(U.shape[0]):
         u_i = U[i, :]
         V_T_sampled, X_sampled = _stochastic_sample(V.T, X, sg_sample_ratio, 1)
@@ -270,7 +276,7 @@ def _newton_update_left(np.ndarray[DTYPE_t, ndim=2] U,
             dU = dU_full[i, :]
         else:
             x_i = X_sampled[i, :]
-            res_X = _residual(u_i, V_T_sampled, x_i, link, res_X_should_flatten)
+            res_X = _residual(u_i, V_T_sampled, x_i, link, X_is_sparse)
             dU = alpha * np.dot(res_X, V_T_sampled.T) + l1_reg * np.sign(u_i) + l2_reg * u_i
 
         if not precompute_ddU_inv:
@@ -305,16 +311,16 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
                                (1 - alpha) * np.dot(Z.T, Z) +
                                l2_reg * np.eye(V.shape[1]),
                                hessian_pertubation)
-    res_X_should_flatten = issparse(X)
-    res_Y_should_flatten = issparse(Y)
+    X_is_sparse = issparse(X)
+    Y_is_sparse = issparse(Y)
     for i in range(V.shape[0]):
         v_i = V[i, :]
 
         U_sampled, X_sampled = _stochastic_sample(U, X, sg_sample_ratio, 0)
-        res_X_T = _residual(v_i, U_sampled.T, X_sampled[:, i], x_link, res_X_should_flatten)
+        res_X_T = _residual(v_i, U_sampled.T, X_sampled[:, i], x_link, X_is_sparse)
 
         Z_sampled, Y_sampled = _stochastic_sample(Z, Y, sg_sample_ratio, 0)
-        res_Y_T = _residual(v_i, Z_sampled.T, Y_sampled[:, i], y_link, res_Y_should_flatten)
+        res_Y_T = _residual(v_i, Z_sampled.T, Y_sampled[:, i], y_link, Y_is_sparse)
 
         dV = alpha * np.dot(res_X_T, U_sampled) + \
             (1 - alpha) * np.dot(res_Y_T, Z_sampled) + \
