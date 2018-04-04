@@ -41,7 +41,9 @@ def inverse(x, link):
 
 
 def compute_factorization_error(target, left_factor, right_factor, link, beta_loss):
-    if link == "linear":
+    if target is None:
+        return 0
+    elif link == "linear":
         return _beta_divergence(target, left_factor, right_factor, beta_loss, square_root=True)
     elif link == "logit":
         return np.linalg.norm(target - sigmoid(np.dot(left_factor, right_factor)))
@@ -101,9 +103,9 @@ class _IterativeCMFSolver:
             The pertubation to the Hessian in the newton solver to maintain positive definiteness
         """
     def __init__(self, max_iter=200, tol=1e-4, beta_loss="frobenius",
-                 l1_reg=0, l2_reg=0, alpha=0.5,
-                 update_H=True, verbose=0,
+                 l1_reg=0, l2_reg=0, alpha=0.5, verbose=0,
                  U_non_negative=True, V_non_negative=True, Z_non_negative=True,
+                 update_U=True, update_V=True, update_Z=True,
                  x_link="linear", y_link="linear", hessian_pertubation=0.2,
                  sg_sample_ratio=1., random_state=None):
         self.max_iter = max_iter
@@ -112,11 +114,13 @@ class _IterativeCMFSolver:
         self.l1_reg = l1_reg
         self.l2_reg = l2_reg
         self.alpha = alpha
-        self.update_H = update_H
         self.verbose = verbose
         self.U_non_negative = U_non_negative
         self.V_non_negative = V_non_negative
         self.Z_non_negative = Z_non_negative
+        self.update_U = update_U
+        self.update_V = update_V
+        self.update_Z = update_Z
         self.x_link = x_link
         self.y_link = y_link
         self.hessian_pertubation = hessian_pertubation
@@ -252,15 +256,18 @@ class MUSolver(_IterativeCMFSolver):
         # TODO: Enable specification of gamma
         gamma = 1.
 
-        delta_V = self._multiplicative_update_v(X, Y, U, V, Z, self.beta_loss, l1_reg,
-                                                l2_reg, gamma)
-        V *= delta_V
+        if self.update_V:
+            delta_V = self._multiplicative_update_v(X, Y, U, V, Z, self.beta_loss, l1_reg,
+                                                    l2_reg, gamma)
+            V *= delta_V
 
-        delta_U = self._multiplicative_update_u(X, U, V, self.beta_loss, l1_reg, l2_reg, gamma)
-        U *= delta_U
+        if self.update_U:
+            delta_U = self._multiplicative_update_u(X, U, V, self.beta_loss, l1_reg, l2_reg, gamma)
+            U *= delta_U
 
-        delta_Z = self._multiplicative_update_z(Y, V, Z, self.beta_loss, l1_reg, l2_reg, gamma)
-        Z *= delta_Z
+        if self.update_Z:
+            delta_Z = self._multiplicative_update_z(Y, V, Z, self.beta_loss, l1_reg, l2_reg, gamma)
+            Z *= delta_Z
 
 
 if USE_CYTHON:
@@ -279,10 +286,10 @@ if USE_CYTHON:
         """
         def fit_iterative_update(self, X, Y, U, V, Z):
             # handle memory ordering and format issues for speed up
-            X_ = X.tocsr() if issparse(X) else np.ascontiguousarray(X)
+            X_ = X.tocsr() if issparse(X) else np.ascontiguousarray(X) if X is not None else X
             # instead of solving for Y = VZ^T, in order to make access to V continuous
             # for approximating both X and Y, we will solve Y^T = ZV^T
-            Y_ = Y.T.tocsr() if issparse(Y) else np.ascontiguousarray(Y.T)
+            Y_ = Y.T.tocsr() if issparse(Y) else np.ascontiguousarray(Y.T) if Y is not None else Y
 
             # U, V, Z must be C-ordered for cython dot product to work
             U = np.ascontiguousarray(U)
@@ -291,19 +298,24 @@ if USE_CYTHON:
             return super().fit_iterative_update(X_, Y_, U, V, Z)
 
         def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
-            _newton_update_left(U, V, X, alpha, l1_reg, l2_reg,
-                                self.x_link, self.U_non_negative,
-                                self.sg_sample_ratio,
-                                self.hessian_pertubation)
-            _newton_update_left(Z, V, Y, 1 - alpha, l1_reg, l2_reg,
-                                self.y_link, self.Z_non_negative,
-                                self.sg_sample_ratio,
-                                self.hessian_pertubation)
-            _newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
-                             self.x_link, self.y_link,
-                             self.V_non_negative,
-                             self.sg_sample_ratio,
-                             self.hessian_pertubation)
+            if self.update_U:
+                _newton_update_left(U, V, X, alpha, l1_reg, l2_reg,
+                                    self.x_link, self.U_non_negative,
+                                    self.sg_sample_ratio,
+                                    self.hessian_pertubation)
+
+            if self.update_Z:
+                _newton_update_left(Z, V, Y, 1 - alpha, l1_reg, l2_reg,
+                                    self.y_link, self.Z_non_negative,
+                                    self.sg_sample_ratio,
+                                    self.hessian_pertubation)
+
+            if self.update_V:
+                _newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
+                                 self.x_link, self.y_link,
+                                 self.V_non_negative,
+                                 self.sg_sample_ratio,
+                                 self.hessian_pertubation)
 
         def compute_error(self, X, Y, U, V, Z):
             # override because we are solving for Y^T = ZV^T
@@ -490,10 +502,15 @@ else:
                 self._row_newton_update(Z, i, dZ, ddZ_inv, non_negative=non_negative)
 
         def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
-            self._newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
-                                  non_negative=self.U_non_negative, link=self.x_link)
-            self._newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
-                                  non_negative=self.Z_non_negative, link=self.y_link)
-            self._newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
-                                  non_negative=self.V_non_negative, x_link=self.x_link,
-                                  y_link=self.y_link)
+            if self.update_U:
+                self._newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
+                                      non_negative=self.U_non_negative, link=self.x_link)
+
+            if self.update_Z:
+                self._newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
+                                      non_negative=self.Z_non_negative, link=self.y_link)
+
+            if self.update_V:
+                self._newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
+                                      non_negative=self.V_non_negative, x_link=self.x_link,
+                                      y_link=self.y_link)

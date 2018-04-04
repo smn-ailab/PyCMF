@@ -8,7 +8,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_random_state, check_array
 from sklearn.utils.extmath import randomized_svd, squared_norm
 from sklearn.utils.validation import check_non_negative
-from sklearn.decomposition.nmf import _check_init
 
 # solvers
 from .cmf_solvers import MUSolver, NewtonSolver, compute_factorization_error
@@ -27,6 +26,17 @@ def norm(x):
     See: http://fseoane.net/blog/2011/computing-the-vector-norm/
     """
     return sqrt(squared_norm(x))
+
+
+def _check_init(A, shape, whom, non_negative):
+    A = check_array(A)
+    if np.shape(A) != shape:
+        raise ValueError('Array with wrong shape passed to %s. Expected %s, '
+                         'but got %s ' % (whom, shape, np.shape(A)))
+    if non_negative:
+        check_non_negative(A, whom)
+        if np.max(A) == 0:
+            raise ValueError('Array passed to %s is full of zeros.' % whom)
 
 
 def _initialize_mf(M, n_components, init=None, eps=1e-6, random_state=None, non_negative=False):
@@ -99,7 +109,7 @@ def _initialize_mf(M, n_components, init=None, eps=1e-6, random_state=None, non_
             init = 'random'
 
     if init == 'random':
-        avg = np.sqrt(M.mean() / n_components)
+        avg = np.sqrt(np.abs(M.mean()) / n_components)
         rng = check_random_state(random_state)
         A = avg * rng.randn(n_samples, n_components)
         B = avg * rng.randn(n_components, n_features)
@@ -193,13 +203,25 @@ def _initialize_mf(M, n_components, init=None, eps=1e-6, random_state=None, non_
     return A, B.T
 
 
+def _init_custom(A, M, n_components, idx,
+                 non_negative=False, random_state=None):
+    if A is not None:
+        _check_init(A, (M.shape[idx], n_components), "CMF (input {})".format(idx), non_negative)
+        return A
+    else:
+        return _initialize_mf(M, n_components, init="random", random_state=random_state,
+                              non_negative=non_negative)[idx]
+
+
 def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
                                     n_components=None, solver="mu", alpha=0.5,
                                     x_init=None, y_init=None, beta_loss="frobenius",
                                     tol=1e-4, l1_reg=0., l2_reg=0.,
                                     random_state=None, max_iter=200, verbose=0,
                                     U_non_negative=True, V_non_negative=True,
-                                    Z_non_negative=True, x_link="linear", y_link="linear",
+                                    Z_non_negative=True, update_U=True,
+                                    update_V=True, update_Z=True,
+                                    x_link="linear", y_link="linear",
                                     hessian_pertubation=0.2, sg_sample_ratio=1.):
     """Compute Collective Matrix Factorization (CMF)
 
@@ -316,6 +338,9 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
     Z_non_negative: bool, default: True
         Whether to enforce non-negativity for Z. Only applicable for the newton solver.
 
+    update_U, update_V, update_Z: bool, default: True
+        Whether to update U, V, and Z respectively.
+
     x_link: str, default: "linear"
         One of either "logit" of "linear". The link function for transforming UV^T to approximate X
 
@@ -358,12 +383,15 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
         n_components = max(X.shape[1], Y.shape[1])
 
     # sanity check the input
-    X = check_array(X, accept_sparse=('csr', 'csc'), dtype=float)
-    Y = check_array(Y, accept_sparse=('csr', 'csc'), dtype=float)
+    if update_U or update_V:
+        X = check_array(X, accept_sparse=('csr', 'csc'), dtype=float)
+    if update_Z or update_V:
+        Y = check_array(Y, accept_sparse=('csr', 'csc'), dtype=float)
 
-    if X.shape[1] != Y.shape[0]:
-        raise ValueError("Expected X.shape[1] == Y.shape[0], " +
-                         "found X.shape = {}, Y.shape = {}".format(X.shape[1], Y.shape[0]))
+    if update_V:
+        if X.shape[1] != Y.shape[0]:
+            raise ValueError("Expected X.shape[1] == Y.shape[0], " +
+                             "found X.shape = {}, Y.shape = {}".format(X.shape[1], Y.shape[0]))
 
     if x_link not in ["linear", "logit"]:
         raise ValueError("No such link %s for x_link" % x_link)
@@ -373,16 +401,22 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
 
     # initialize U, V, and Z
     if x_init == 'custom':
-        _check_init(U, (X.shape[0], n_components), "CMF (input U)")
-        _check_init(V, (X.shape[1], n_components), "CMF (input V)")
+        if X is not None:
+            U = _init_custom(U, X, n_components, 0,
+                             non_negative=U_non_negative, random_state=random_state)
+            V = _init_custom(V, X, n_components, 1,
+                             non_negative=V_non_negative, random_state=random_state)
     else:
         x_init = "random" if x_link == "logit" else x_init
         U, V = _initialize_mf(X, n_components, init=x_init, random_state=random_state,
                               non_negative=(U_non_negative or V_non_negative))
 
     if y_init == 'custom':
-        _check_init(V, (X.shape[1], n_components), "CMF (input V)")
-        _check_init(Z, (Y.shape[1], n_components), "CMF (input Z)")
+        if Y is not None:
+            V = _init_custom(V, Y, n_components, 0,
+                             non_negative=V_non_negative, random_state=random_state)
+            Z = _init_custom(Z, Y, n_components, 1,
+                             non_negative=Z_non_negative, random_state=random_state)
         V_ = V
     else:
         y_init = "random" if y_link == "logit" else y_init
@@ -402,21 +436,16 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
             warnings.warn("mu solver does not accept link functions other than linear, link arguments will be ignored")
 
         solver_object = MUSolver(max_iter=max_iter, tol=tol, verbose=verbose,
+                                 update_U=update_U, update_V=update_V, update_Z=update_Z,
                                  l1_reg=l1_reg, l2_reg=l2_reg, beta_loss=beta_loss, random_state=random_state)
     elif solver == "newton":
-        if sp.issparse(X) and X.getformat() != "csr":
-            warnings.warn("X is sparse but not in csr format. " +
-                          "This will cause significant slow down for the Newton solver.")
-        if sp.issparse(Y) and Y.getformat() != "csr":
-            warnings.warn("Y is sparse but not in csr format. " +
-                          "This will cause significant slow down for the Newton solver.")
-
         if alpha == "auto":
             # adjust alpha so that both X and Y are "equally" considered,
             # i.e. X.shape[0] * alpha = Y.shape[1] * (1 - alpha)
             alpha = Y.shape[1] / (X.shape[0] + Y.shape[1])
         solver_object = NewtonSolver(alpha=alpha, l1_reg=l1_reg, tol=tol,
                                      l2_reg=l2_reg, max_iter=max_iter, verbose=verbose,
+                                     update_U=update_U, update_V=update_V, update_Z=update_Z,
                                      U_non_negative=U_non_negative, V_non_negative=V_non_negative,
                                      Z_non_negative=Z_non_negative, x_link=x_link, y_link=y_link,
                                      hessian_pertubation=hessian_pertubation,
@@ -662,7 +691,8 @@ class CMF(BaseEstimator, TransformerMixin):
             tol=self.tol, max_iter=self.max_iter, l1_reg=self.l1_reg,
             l2_reg=self.l2_reg, random_state=self.random_state, verbose=self.verbose,
             U_non_negative=self.U_non_negative, V_non_negative=self.V_non_negative,
-            Z_non_negative=self.Z_non_negative, x_link=self.x_link, y_link=self.y_link,
+            Z_non_negative=self.Z_non_negative,
+            x_link=self.x_link, y_link=self.y_link,
             hessian_pertubation=self.hessian_pertubation, sg_sample_ratio=self.sg_sample_ratio)
 
         self.reconstruction_err_ = compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss)
@@ -693,6 +723,29 @@ class CMF(BaseEstimator, TransformerMixin):
         """
         self.fit_transform(X, Y, **params)
         return self
+
+    def transform(self, X, Y):
+        """Fit on X/Y while keeping components matrix (V) constant.
+        If only fitting on either X or Y, set the other to None.
+        """
+        assert(hasattr(self, "components"))
+        update_U = X is not None
+        update_Z = Y is not None
+        alpha = 1 if Y is None else 0 if X is None else "auto"
+        U = None if update_U else self.x_weights
+        Z = None if update_Z else self.y_weights
+        U, V, Z, n_iter_ = collective_matrix_factorization(
+            X=X, Y=Y, U=U, V=self.components, Z=Z,
+            n_components=self.n_components, x_init="custom", y_init="custom",
+            solver=self.solver, alpha=alpha, beta_loss=self.beta_loss,
+            tol=self.tol, max_iter=self.max_iter, l1_reg=self.l1_reg,
+            l2_reg=self.l2_reg, random_state=self.random_state, verbose=self.verbose,
+            U_non_negative=self.U_non_negative, V_non_negative=self.V_non_negative,
+            Z_non_negative=self.Z_non_negative,
+            update_U=update_U, update_V=False, update_Z=update_Z,
+            x_link=self.x_link, y_link=self.y_link,
+            hessian_pertubation=self.hessian_pertubation, sg_sample_ratio=self.sg_sample_ratio)
+        return U, V, Z
 
     def print_topic_terms(self, vectorizer, topn_words=10, importances=True):
         """For interpreting the results when using CMF for labeled topic modeling.
