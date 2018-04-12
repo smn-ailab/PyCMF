@@ -11,6 +11,8 @@ parser.add_argument('--runs', '-r', type=int, default=1,
                     help='The number of runs per experiment')
 parser.add_argument('--worst', '-w', action='store_true',
                     help='Whether to print worst performance or not')
+parser.add_argument('--runslow', action='store_true',
+                    help='Whether to run slow benchmarks or not.')
 args = parser.parse_args()
 
 SP = csr_matrix
@@ -93,7 +95,8 @@ if __name__ == "__main__":
         BenchmarkCase(f"Sparse CMF, {solver}",
                       "sparse_cmf_benchmark",
                       arguments=f"'{solver}'").run()
-    for ratio in [1., 0.2]:
+    ratios = [1., 0.2] if args.runslow else [1.]
+    for ratio in ratios:
         BenchmarkCase(f"Sparse CMF with logits, ratio={ratio}",
                       "sparse_cmf_with_logits_benchmark",
                       arguments=f"{ratio}").run()
