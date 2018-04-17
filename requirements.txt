@@ -1,0 +1,7 @@
+pip
+numpy
+scipy
+scikit-learn
+cython
+nose
+pytest
