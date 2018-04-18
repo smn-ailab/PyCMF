@@ -3,14 +3,12 @@ import time
 
 import numpy as np
 import scipy
-import warnings
-
 from sklearn.utils.extmath import safe_sparse_dot
 from sklearn.decomposition.nmf import _beta_divergence, _beta_loss_to_float
 from scipy.special import expit
 from scipy.sparse import issparse
 
-USE_CYTHON = False
+USE_CYTHON = False  # currently, cython is disabled due to unsolved numerical bugs
 EPSILON = np.finfo(np.float32).eps
 
 INTEGER_TYPES = (numbers.Integral, np.integer)

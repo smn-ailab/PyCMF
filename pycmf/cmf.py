@@ -3,7 +3,6 @@ from math import sqrt
 import warnings
 import numbers
 import numpy as np
-import scipy.sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_random_state, check_array
 from sklearn.utils.extmath import randomized_svd, squared_norm

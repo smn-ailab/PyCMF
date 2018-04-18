@@ -16,7 +16,7 @@ extensions = [
 
 setup(
     name='pycmf',
-    version='0.9.0',
+    version='1.0.0',
     packages=['pycmf'],
     include_dirs=[numpy.get_include()],
     ext_modules=extensions,
