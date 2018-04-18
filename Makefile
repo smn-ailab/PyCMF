@@ -13,8 +13,8 @@ inplace:
 
 install: clean
 	$(PYTHON) setup.py install
-	pytest
+	(cd tests; pytest)
 
 dev: clean
 	$(PYTHON) setup_dev.py install
-	pytest
+	(cd tests; pytest)

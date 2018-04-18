@@ -304,6 +304,17 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
     """Updates V row-wise inplace."""
     cdef int i
 
+    precompute_dV = (sg_sample_ratio == 1.)
+    if precompute_dV:
+        res_X_T = inverse(np.dot(U, V.T), x_link) - X
+        res_Y_T = inverse(np.dot(Z, V.T), y_link) - Y
+        dV_full = alpha * np.dot(res_X_T.T, U) + \
+                  (1 - alpha) * np.dot(res_Y_T.T, Z) + \
+                  l1_reg * np.sign(V) + l2_reg * V
+        if isinstance(dV_full, np.matrix):
+            dV_full = np.asarray(dV_full)
+
+
     precompute_ddV_inv = (x_link == "linear" and y_link == "linear" and sg_sample_ratio == 1.)
     if precompute_ddV_inv:
         # ddV_inv is constant w.r.t. the samples of V, so we precompute it to save computation
@@ -315,16 +326,18 @@ def _newton_update_V(np.ndarray[DTYPE_t, ndim=2] V,
     Y_is_sparse = issparse(Y)
     for i in range(V.shape[0]):
         v_i = V[i, :]
-
         U_sampled, X_sampled = _stochastic_sample(U, X, sg_sample_ratio, 0)
-        res_X_T = _residual(v_i, U_sampled.T, X_sampled[:, i], x_link, X_is_sparse)
-
         Z_sampled, Y_sampled = _stochastic_sample(Z, Y, sg_sample_ratio, 0)
-        res_Y_T = _residual(v_i, Z_sampled.T, Y_sampled[:, i], y_link, Y_is_sparse)
 
-        dV = alpha * np.dot(res_X_T, U_sampled) + \
-            (1 - alpha) * np.dot(res_Y_T, Z_sampled) + \
-            l1_reg * np.sign(v_i) + l2_reg * v_i
+        if precompute_dV:
+            dV = dV_full[i, :].flatten()
+        else:
+            res_X_T = _residual(v_i, U_sampled.T, X_sampled[:, i], x_link, X_is_sparse)
+            res_Y_T = _residual(v_i, Z_sampled.T, Y_sampled[:, i], y_link, Y_is_sparse)
+
+            dV = alpha * np.dot(res_X_T, U_sampled) + \
+                (1 - alpha) * np.dot(res_Y_T, Z_sampled) + \
+                l1_reg * np.sign(v_i) + l2_reg * v_i
 
         if not precompute_ddV_inv:
             if x_link == "logit":

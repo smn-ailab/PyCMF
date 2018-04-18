@@ -10,12 +10,7 @@ from sklearn.decomposition.nmf import _beta_divergence, _beta_loss_to_float
 from scipy.special import expit
 from scipy.sparse import issparse
 
-try:
-    from .cmf_newton_solver import _newton_update_left, _newton_update_V
-    USE_CYTHON = True
-except ModuleNotFoundError:
-    warnings.warn("Cython extensions not found, defaulting to slow python implementation")
-    USE_CYTHON = False
+USE_CYTHON = False
 EPSILON = np.finfo(np.float32).eps
 
 INTEGER_TYPES = (numbers.Integral, np.integer)
@@ -438,6 +433,17 @@ else:
 
         def _newton_update_V(self, V, U, Z, X, Y, alpha, l1_reg, l2_reg,
                              x_link="linear", y_link="linear", non_negative=True):
+            precompute_dV = (self.sg_sample_ratio == 1.)
+            if precompute_dV:
+                res_X_T = inverse(np.dot(U, V.T), x_link) - X
+                res_Y_T = inverse(np.dot(Z, V.T), y_link) - Y.T
+                dV_full = alpha * np.dot(res_X_T.T, U) + \
+                          (1 - alpha) * np.dot(res_Y_T.T, Z) + \
+                          l1_reg * np.sign(V) + l2_reg * V
+
+                if isinstance(dV_full, np.matrix):
+                    dV_full = np.asarray(dV_full)
+
             precompute_ddV_inv = (x_link == "linear" and y_link == "linear" and self.sg_sample_ratio == 1.)
             if precompute_ddV_inv:
                 # ddV_inv is constant w.r.t. the samples of V, so we precompute it to save computation
@@ -449,14 +455,16 @@ else:
                 v_i = V[i, :]
 
                 U_sampled, X_sampled = self._stochastic_sample(U, X)
-                res_X = self._residual(U_sampled, v_i.T, X_sampled[:, i], x_link)
-
                 Z_T_sampled, Y_sampled = self._stochastic_sample(Z.T, Y, axis=1)
-                res_Y = self._residual(v_i, Z_T_sampled, Y_sampled[i, :], y_link)
 
-                dV = alpha * np.dot(res_X.T, U_sampled) + \
-                    (1 - alpha) * np.dot(res_Y, Z_T_sampled.T) + \
-                    l1_reg * np.sign(v_i) + l2_reg * v_i
+                if not precompute_dV:
+                    res_X = self._residual(U_sampled, v_i.T, X_sampled[:, i], x_link)
+                    res_Y = self._residual(v_i, Z_T_sampled, Y_sampled[i, :], y_link)
+                    dV = alpha * np.dot(res_X.T, U_sampled) + \
+                        (1 - alpha) * np.dot(res_Y, Z_T_sampled.T) + \
+                        l1_reg * np.sign(v_i) + l2_reg * v_i
+                else:
+                    dV = dV_full[i, :]
 
                 if not precompute_ddV_inv:
                     if x_link == "logit":
