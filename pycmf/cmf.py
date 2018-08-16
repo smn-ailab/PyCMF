@@ -240,7 +240,7 @@ def _adaptive_init(V, M, link):
 
     result = least_squares(residual, np.random.rand(V.shape[1]))
 
-    return result.x
+    return result.x[np.newaxis, :]
 
 
 def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
