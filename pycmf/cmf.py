@@ -5,6 +5,7 @@ import warnings
 from math import sqrt
 
 import numpy as np
+from scipy.optimize import least_squares
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_array, check_random_state
 from sklearn.utils.extmath import randomized_svd, squared_norm
@@ -28,6 +29,10 @@ def norm(x):
     See: http://fseoane.net/blog/2011/computing-the-vector-norm/
     """
     return sqrt(squared_norm(x))
+
+
+def logit(x):
+    return 1 / (1 + np.exp(- x))
 
 
 def _check_init(A, shape, whom, non_negative):
@@ -215,8 +220,27 @@ def _init_custom(A, M, n_components, idx,
                               non_negative=non_negative)[idx]
 
 
-def _init_logit_partial(X, M):
-    pass
+def _adaptive_init(V, M, link):
+    """Return initialized matrix X to minimize || M - link(A \dot X) ||^2 smart way.
+
+    :Algorithm:
+        Let matrix V be initialized already, and M be matrix to be decomposed.
+        Find X to minimize || M - link(A \dot X) ||^2 using scipy.optimize.least_squares.
+        Dimension of M must be 1. Supported link functions are "linear" and "logit".
+    """
+    if M.shape[1] > 1:
+        raise ValueError(f"Matrix to be decomposed must have at most 1 dimension. But, it has {M.shape[1]}")
+
+    if link == "linear":
+        def residual(x): return M - V @ x
+    elif link == "logit":
+        def residual(x): return M - logit(V @ x)
+    else:
+        raise ValueError(f"{link} is not supported in adaptive init.")
+
+    result = least_squares(residual, np.random.rand(M.shape[0]))
+
+    return result.x
 
 
 def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
@@ -275,7 +299,7 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
         Number of components, if n_components is not set all features
         are kept.
 
-    x_init, y_init :  None | 'random' | 'nndsvd' | 'nndsvda' | 'nndsvdar' | 'custom' | 'svd'
+    x_init, y_init :  None | 'random' | 'nndsvd' | 'nndsvda' | 'nndsvdar' | 'custom' | 'svd' | 'adaptive'
         Method used to initialize the procedure.
         Default: 'nndsvd' if n_components < n_features, otherwise random.
         Valid options:
@@ -296,6 +320,8 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
         - 'custom': use custom matrices U, V and Z
 
         - 'svd': use randomized svd to find approximation allowing negative values
+
+        - 'adaptive': initialize Z using already initialized V. only availave with y_init.
 
 
     solver : 'newton' | 'mu'
@@ -405,42 +431,10 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
     if y_link not in ["linear", "logit"]:
         raise ValueError("No such link %s for y_link" % y_link)
 
+    if x_init == "adaptive":
+        raise ValueError("Adaptive init is only available in y_init.")
+
     # initialize U, V, and Z
-    if U_non_negative == Z_non_negative:
-        if x_init == "custom" and X is not None:
-            U = _init_custom(U, X, n_components, 0,
-                             non_negative=U_non_negative, random_state=random_state)
-            V = _init_custom(V, X, n_components, 1,
-                             non_negative=V_non_negative, random_state=random_state)
-        else:
-            x_init = "random" if x_link == "logit" else x_init
-            U, V = _initialize_mf(X, n_components, init=x_init, random_state=random_state,
-                                  non_negative=(U_non_negative or V_non_negative))
-
-        if y_init == 'custom' and Y is not None:
-            V_ = _init_custom(V, Y, n_components, 0,
-                              non_negative=V_non_negative, random_state=random_state)
-            Z = _init_custom(Z, Y, n_components, 1,
-                             non_negative=Z_non_negative, random_state=random_state)
-        else:
-            y_init = "random" if y_link == "logit" else y_init
-            V_, Z = _initialize_mf(Y, n_components, init=y_init, random_state=random_state,
-                                   non_negative=(Z_non_negative or V_non_negative))
-        V = (V + V_) / 2
-
-    elif U_non_negative:
-        if x_init == "custom" and X is not None:
-            U = _init_custom(U, X, n_components, 0,
-                             non_negative=U_non_negative, random_state=random_state)
-            V = _init_custom(V, X, n_components, 1,
-                             non_negative=V_non_negative, random_state=random_state)
-        else:
-            if x_link == "logit":
-                U = _init_partial(V, X, n_components)
-            else:
-                U, V = _initialize_mf(X, n_components, init=x_init, random_state=random_state,
-                                      non_negative=(U_non_negative or V_non_negative))
-
     if x_init == 'custom':
         if X is not None:
             U = _init_custom(U, X, n_components, 0,
@@ -452,24 +446,27 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
         U, V = _initialize_mf(X, n_components, init=x_init, random_state=random_state,
                               non_negative=(U_non_negative or V_non_negative))
 
-    if y_init == 'custom':
-        if Y is not None:
-            V = _init_custom(V, Y, n_components, 0,
-                             non_negative=V_non_negative, random_state=random_state)
-            Z = _init_custom(Z, Y, n_components, 1,
-                             non_negative=Z_non_negative, random_state=random_state)
-        V_ = V
+    if y_init == 'adaptive':
+        Z = _adaptive_init(V, Y, y_link)
     else:
-        y_init = "random" if y_link == "logit" else y_init
-        V_, Z = _initialize_mf(Y, n_components, init=y_init, random_state=random_state,
-                               non_negative=(Z_non_negative or V_non_negative))
+        if y_init == 'custom':
+            if Y is not None:
+                V = _init_custom(V, Y, n_components, 0,
+                                 non_negative=V_non_negative, random_state=random_state)
+                Z = _init_custom(Z, Y, n_components, 1,
+                                 non_negative=Z_non_negative, random_state=random_state)
+            V_ = V
+        else:
+            y_init = "random" if y_link == "logit" else y_init
+            V_, Z = _initialize_mf(Y, n_components, init=y_init, random_state=random_state,
+                                   non_negative=(Z_non_negative or V_non_negative))
 
-    if U_non_negative == Z_non_negative:
-        V = (V + V_) / 2
-    elif U_non_negative:
-        V = V
-    elif Z_non_negative:
-        V = V_
+        if U_non_negative == Z_non_negative:
+            V = (V + V_) / 2
+        elif U_non_negative:
+            V = V
+        elif Z_non_negative:
+            V = V_
 
     # Solve
     if solver == "mu":
