@@ -447,6 +447,7 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
                               non_negative=(U_non_negative or V_non_negative))
 
     if y_init == 'adaptive':
+        print("Adaptive is selected!!")
         Z = _adaptive_init(V, Y, y_link)
     else:
         if y_init == 'custom':
