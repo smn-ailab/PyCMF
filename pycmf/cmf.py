@@ -1,16 +1,19 @@
 from __future__ import division, print_function
-from math import sqrt
-import warnings
+
 import numbers
+import warnings
+from math import sqrt
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils import check_random_state, check_array
+from sklearn.utils import check_array, check_random_state
 from sklearn.utils.extmath import randomized_svd, squared_norm
 from sklearn.utils.validation import check_non_negative
 
+from .analysis import (_print_topic_terms_from_matrix,
+                       _print_topic_terms_with_importances_from_matrices)
 # solvers
 from .cmf_solvers import MUSolver, NewtonSolver, compute_factorization_error
-from .analysis import _print_topic_terms_from_matrix, _print_topic_terms_with_importances_from_matrices
 
 EPSILON = np.finfo(np.float32).eps
 
@@ -212,6 +215,10 @@ def _init_custom(A, M, n_components, idx,
                               non_negative=non_negative)[idx]
 
 
+def _init_logit_partial(X, M):
+    pass
+
+
 def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
                                     n_components=None, solver="mu", alpha=0.5,
                                     x_init=None, y_init=None, beta_loss="frobenius",
@@ -399,6 +406,41 @@ def collective_matrix_factorization(X, Y, U=None, V=None, Z=None,
         raise ValueError("No such link %s for y_link" % y_link)
 
     # initialize U, V, and Z
+    if U_non_negative == Z_non_negative:
+        if x_init == "custom" and X is not None:
+            U = _init_custom(U, X, n_components, 0,
+                             non_negative=U_non_negative, random_state=random_state)
+            V = _init_custom(V, X, n_components, 1,
+                             non_negative=V_non_negative, random_state=random_state)
+        else:
+            x_init = "random" if x_link == "logit" else x_init
+            U, V = _initialize_mf(X, n_components, init=x_init, random_state=random_state,
+                                  non_negative=(U_non_negative or V_non_negative))
+
+        if y_init == 'custom' and Y is not None:
+            V_ = _init_custom(V, Y, n_components, 0,
+                              non_negative=V_non_negative, random_state=random_state)
+            Z = _init_custom(Z, Y, n_components, 1,
+                             non_negative=Z_non_negative, random_state=random_state)
+        else:
+            y_init = "random" if y_link == "logit" else y_init
+            V_, Z = _initialize_mf(Y, n_components, init=y_init, random_state=random_state,
+                                   non_negative=(Z_non_negative or V_non_negative))
+        V = (V + V_) / 2
+
+    elif U_non_negative:
+        if x_init == "custom" and X is not None:
+            U = _init_custom(U, X, n_components, 0,
+                             non_negative=U_non_negative, random_state=random_state)
+            V = _init_custom(V, X, n_components, 1,
+                             non_negative=V_non_negative, random_state=random_state)
+        else:
+            if x_link == "logit":
+                U = _init_partial(V, X, n_components)
+            else:
+                U, V = _initialize_mf(X, n_components, init=x_init, random_state=random_state,
+                                      non_negative=(U_non_negative or V_non_negative))
+
     if x_init == 'custom':
         if X is not None:
             U = _init_custom(U, X, n_components, 0,
@@ -617,6 +659,7 @@ class CMF(BaseEstimator, TransformerMixin):
         Wang, Y., Yanchunzhangvueduau, E., & Zhou, B. (2017).
         Semi-supervised collective matrix factorization for topic detection and document clustering.
         """
+
     def __init__(self, n_components=None, x_init=None, y_init=None, solver='mu', alpha='auto',
                  beta_loss='frobenius', tol=1e-4, max_iter=600,
                  random_state=None, l1_reg=0., l2_reg=0., verbose=0,
