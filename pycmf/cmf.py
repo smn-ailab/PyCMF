@@ -240,7 +240,9 @@ def _adaptive_init(V, M, link):
 
     print(M.shape)
     print(V.shape)
-    print(np.random.rand(V.shape[1]))
+    x = np.random.rand(V.shape[1])
+    print(x.shape)
+    print((M - logit(V @ x)).shape)
 
     result = least_squares(residual, np.random.rand(V.shape[1]))
 
