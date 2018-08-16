@@ -238,6 +238,10 @@ def _adaptive_init(V, M, link):
     else:
         raise ValueError(f"{link} is not supported in adaptive init.")
 
+    print(M.shape)
+    print(V.shape)
+    print(np.random.rand(V.shape[1]))
+
     result = least_squares(residual, np.random.rand(V.shape[1]))
 
     return result.x
