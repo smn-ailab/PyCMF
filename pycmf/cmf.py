@@ -232,9 +232,9 @@ def _adaptive_init(V, M, link):
         raise ValueError(f"Matrix to be decomposed must have at most 1 dimension. But, it has {M.shape[1]}")
 
     if link == "linear":
-        def residual(x): return M - V @ x
+        def residual(x): return M.T - x @ V.T
     elif link == "logit":
-        def residual(x): return M - logit(V @ x)
+        def residual(x): return M.T - logit(x @ V.T)
     else:
         raise ValueError(f"{link} is not supported in adaptive init.")
 
