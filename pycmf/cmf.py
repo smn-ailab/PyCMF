@@ -232,17 +232,11 @@ def _adaptive_init(V, M, link):
         raise ValueError(f"Matrix to be decomposed must have at most 1 dimension. But, it has {M.shape[1]}")
 
     if link == "linear":
-        def residual(x): return M - V @ x
+        def residual(x): return (M.T - V @ x)[0]
     elif link == "logit":
-        def residual(x): return M - logit(V @ x)
+        def residual(x): return (M.T - logit(V @ x))[0]
     else:
         raise ValueError(f"{link} is not supported in adaptive init.")
-
-    print(M.shape)
-    print(V.shape)
-    x = np.random.rand(V.shape[1])
-    print(x.shape)
-    print((M - logit(V @ x)).shape)
 
     result = least_squares(residual, np.random.rand(V.shape[1]))
 
