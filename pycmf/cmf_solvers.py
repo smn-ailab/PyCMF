@@ -406,7 +406,7 @@ else:
             :param u: row to be updated
             :param v: fixed row
             """
-            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :], link, self.beta_loss)
+            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :].T, link, self.beta_loss)
 
             t = - c * tau
             not_found = True
