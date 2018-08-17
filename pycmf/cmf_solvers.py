@@ -427,14 +427,17 @@ else:
             return eta
 
         def _v_armijo(self, u, v, z, x, y, i, grad, x_link, y_link, eta=1, c=0.001, tau=0.5, threshold=2 ** (-5)):
-            current_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :], x_link, self.beta_loss) + \
-                (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :], y_link, self.beta_loss)
+            current_error = self.alpha * compute_factorization_error(x, u, v.T, x_link, self.beta_loss) + \
+                (1 - self.alpha) * compute_factorization_error(y, z, v.T, y_link, self.beta_loss)
 
             t = c * np.dot(grad, - grad)
             not_found = True
             while not_found:
-                candidate_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :] + eta * grad, x_link, self.beta_loss) + \
-                    (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :] + eta * grad, y_link, self.beta_loss)
+                updated_v = v
+                updated_v[i, :] = updated_v[i, :] + eta * grad
+
+                candidate_error = self.alpha * compute_factorization_error(x, u, updated_v.T, x_link, self.beta_loss) + \
+                    (1 - self.alpha) * compute_factorization_error(y, z, updated_v.T, y_link, self.beta_loss)
                 if current_error - candidate_error >= eta * t:
                     not_found = False
                 else:
