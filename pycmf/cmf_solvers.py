@@ -395,7 +395,7 @@ else:
             else:
                 return estimate - ground_truth
 
-        def _armijo(self, x, u, v, i, grad, link, eta=1, c=0.5, tau=0.5):
+        def _armijo(self, x, u, v, i, grad, link, eta=1, c=0.001, tau=0.5):
             """Return best newton step size.
 
             Set t=-c m and iteration counter j = 0.
@@ -419,7 +419,7 @@ else:
 
             return eta
 
-        def _v_armijo(self, u, v, z, x, y, i, grad, x_link, y_link, eta=1, c=0.5, tau=0.5):
+        def _v_armijo(self, u, v, z, x, y, i, grad, x_link, y_link, eta=1, c=0.001, tau=0.5):
             current_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :].T, x_link, self.beta_loss) + \
                 (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :].T, y_link, self.beta_loss)
 
