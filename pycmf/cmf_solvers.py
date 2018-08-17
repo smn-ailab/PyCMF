@@ -16,13 +16,18 @@ INTEGER_TYPES = (numbers.Integral, np.integer)
 
 
 # utility functions
-def sigmoid(M):
+def sig(M):
     return 1 / (1 + np.exp(- M))
 
 
-def d_sigmoid(M):
-    sgm = sigmoid(M)
+def sigmoid(M):
+    sgm = sig(M)
     return sgm * (1 - sgm)
+
+
+def d_sigmoid(M):
+    base = 1 / (1 + np.exp(M))
+    return - base + 3 * base ** 2 - 2 * base ** 3
 
 
 def inverse(x, link):
