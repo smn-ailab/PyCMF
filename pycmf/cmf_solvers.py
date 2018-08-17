@@ -411,7 +411,7 @@ else:
             t = - c * tau
             not_found = True
             while not_found:
-                candidate_error = compute_factorization_error(x[i, :], u[i, :] + alpha * grad[i, :], v[i, :], link, self.beta_loss)
+                candidate_error = compute_factorization_error(x[i, :], u[i, :] + alpha * grad, v[i, :], link, self.beta_loss)
                 if current_error - candidate_error >= alpha * t:
                     not_found = False
                 else:
