@@ -407,7 +407,7 @@ else:
             :param v: fixed row
             """
             print(x.shape, u.shape, v.shape)
-            current_error = compute_factorization_error(x, u, v, link, self.beta_loss)
+            current_error = compute_factorization_error(x, u, v.T, link, self.beta_loss)
 
             t = - c * tau
             not_found = True
@@ -415,7 +415,7 @@ else:
                 updated_u = u
                 updated_u[i, :] = updated_u[i, :] + eta * grad
 
-                candidate_error = compute_factorization_error(x, updated_u, v, link, self.beta_loss)
+                candidate_error = compute_factorization_error(x, updated_u, v.T, link, self.beta_loss)
                 if current_error - candidate_error >= eta * t:
                     not_found = False
                 else:
