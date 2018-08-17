@@ -38,7 +38,7 @@ def compute_factorization_error(target, left_factor, right_factor, link, beta_lo
     if target is None:
         return 0
     elif link == "linear":
-        return np.linalg.norm(target - np.dot(left_factor, right_factor))
+        return _beta_divergence(target, left_factor, right_factor, beta_loss, square_root=True)
     elif link == "logit":
         return np.linalg.norm(target - sigmoid(np.dot(left_factor, right_factor)))
 
@@ -406,7 +406,7 @@ else:
             :param u: row to be updated
             :param v: fixed row
             """
-            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :], link, self.beta_loss)
+            current_error = compute_factorization_error(x[i, :], u[i, :].T, v[i, :], link, self.beta_loss)
 
             t = - c * tau
             not_found = True
