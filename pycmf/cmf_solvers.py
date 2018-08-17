@@ -406,7 +406,6 @@ else:
             :param u: row to be updated
             :param v: fixed row
             """
-            print(x.shape, u.shape, v.shape)
             current_error = compute_factorization_error(x, u, v.T, link, self.beta_loss)
 
             t = - c * tau
