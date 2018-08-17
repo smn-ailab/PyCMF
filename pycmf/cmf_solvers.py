@@ -16,18 +16,13 @@ INTEGER_TYPES = (numbers.Integral, np.integer)
 
 
 # utility functions
-def sig(M):
+def sigmoid(M):
     return 1 / (1 + np.exp(- M))
 
 
-def sigmoid(M):
-    sgm = sig(M)
-    return sgm * (1 - sgm)
-
-
 def d_sigmoid(M):
-    base = 1 / (1 + np.exp(M))
-    return - base + 3 * base ** 2 - 2 * base ** 3
+    sgm = sigmoid(M)
+    return sgm * (1 - sgm)
 
 
 def inverse(x, link):
@@ -326,9 +321,10 @@ if USE_CYTHON:
 else:
     class NewtonSolver(_IterativeCMFSolver):
         """Default implementation when Cython cannot be used."""
+
         @classmethod
         def _row_newton_update(cls, M, idx, dM, ddM_inv,
-                               eta=1., non_negative=True):
+                               eta=1.0, non_negative=True):
             M[idx, :] = M[idx, :] - eta * np.dot(dM, ddM_inv)
             if non_negative:
                 M[idx, :][M[idx, :] < 0] = 0.
@@ -398,6 +394,30 @@ else:
                 return estimate - ground_truth.toarray().flatten()
             else:
                 return estimate - ground_truth
+
+        def _armijo(self, x, u, v, i, grad, link, alpha=1, c=0.5, tau=0.5):
+            """Return best newton step size.
+
+            Set t=-c m and iteration counter j = 0.
+            Until the condition is satisfied that f(x) - f(x + alpha_j * p) >= alpha_j * t repeatedly increment j and set alpha_j = tau * alpha_{j - 1}
+            Return alpha_j as solution.
+
+            :param x: row to be decomposed
+            :param u: row to be updated
+            :param v: fixed row
+            """
+            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :], link, self.beta_loss)
+
+            t = - c * tau
+            not_found = True
+            while not_found:
+                candidate_error = compute_factorization_error(x[i, :], u[i, :] + alpha * grad[i, :], v[i, :], link, self.beta_loss)
+                if current_error - candidate_error >= alpha * t:
+                    not_found = False
+                else:
+                    alpha *= tau
+
+            return alpha
 
         def _newton_update_U(self, U, V, X, alpha, l1_reg, l2_reg,
                              link="linear", non_negative=True):
@@ -513,17 +533,18 @@ else:
                     ddZ_inv = self._safe_invert((1 - alpha) * np.dot(np.dot(V_sampled.T, D), V_sampled) +
                                                 l2_reg * np.eye(Z.shape[1]))
 
-                self._row_newton_update(Z, i, dZ, ddZ_inv, non_negative=non_negative)
+                # Calculate armijo and set eta
+                eta = self._armijo(Y, Z, V, i, - np.dot(dZ, ddZ_inv), link)
+
+                self._row_newton_update(Z, i, dZ, ddZ_inv, non_negative=non_negative, eta=eta)
 
         def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
-            if random() <= alpha:
-                if self.update_U:
-                    self._newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
-                                          non_negative=self.U_non_negative, link=self.x_link)
-            else:
-                if self.update_Z:
-                    self._newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
-                                          non_negative=self.Z_non_negative, link=self.y_link)
+            if self.update_U:
+                self._newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
+                                      non_negative=self.U_non_negative, link=self.x_link)
+            if self.update_Z:
+                self._newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
+                                      non_negative=self.Z_non_negative, link=self.y_link)
 
             if self.update_V:
                 self._newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
