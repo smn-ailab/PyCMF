@@ -420,7 +420,7 @@ else:
                 else:
                     eta *= tau
 
-                if eta * grad <= threshold:
+                if (eta * grad <= threshold).all():
                     eta = 0
                     not_found = False
 
@@ -440,7 +440,7 @@ else:
                 else:
                     eta *= tau
 
-                if eta * grad <= threshold:
+                if (eta * grad <= threshold).all():
                     eta = 0
                     not_found = False
 
