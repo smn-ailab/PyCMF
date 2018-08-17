@@ -228,6 +228,7 @@ def _adaptive_init(V, M, link):
         Find X to minimize || M - link(A \dot X) ||^2 using scipy.optimize.least_squares.
         Dimension of M must be 1. Supported link functions are "linear" and "logit".
     """
+    # TODO: Easily expandable to multi dimension
     if M.shape[1] > 1:
         raise ValueError(f"Matrix to be decomposed must have at most 1 dimension. But, it has {M.shape[1]}")
 

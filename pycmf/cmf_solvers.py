@@ -1,12 +1,13 @@
 import numbers
 import time
+from random import random
 
 import numpy as np
 import scipy
-from sklearn.utils.extmath import safe_sparse_dot
-from sklearn.decomposition.nmf import _beta_divergence, _beta_loss_to_float
-from scipy.special import expit
 from scipy.sparse import issparse
+from scipy.special import expit
+from sklearn.decomposition.nmf import _beta_divergence, _beta_loss_to_float
+from sklearn.utils.extmath import safe_sparse_dot
 
 USE_CYTHON = False  # currently, cython is disabled due to unsolved numerical bugs
 EPSILON = np.finfo(np.float32).eps
@@ -16,7 +17,7 @@ INTEGER_TYPES = (numbers.Integral, np.integer)
 
 # utility functions
 def sigmoid(M):
-    return expit(M)
+    return 1 / (1 + np.exp(- M))
 
 
 def d_sigmoid(M):
@@ -95,6 +96,7 @@ class _IterativeCMFSolver:
         hessian_pertubation: double, default: 0.2
             The pertubation to the Hessian in the newton solver to maintain positive definiteness
         """
+
     def __init__(self, max_iter=200, tol=1e-4, beta_loss="frobenius",
                  l1_reg=0, l2_reg=0, alpha=0.5, verbose=0,
                  U_non_negative=True, V_non_negative=True, Z_non_negative=True,
@@ -127,7 +129,7 @@ class _IterativeCMFSolver:
 
     def compute_error(self, X, Y, U, V, Z):
         return self.alpha * compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss) + \
-               (1 - self.alpha) * compute_factorization_error(Y, V, Z.T, self.y_link, self.beta_loss)
+            (1 - self.alpha) * compute_factorization_error(Y, V, Z.T, self.y_link, self.beta_loss)
 
     def fit_iterative_update(self, X, Y, U, V, Z):
         """Compute CMF with iterative methods.
@@ -277,6 +279,7 @@ if USE_CYTHON:
         Proceeding of the 14th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining
         KDD 08, 650. https://doi.org/10.1145/1401890.1401969
         """
+
         def fit_iterative_update(self, X, Y, U, V, Z):
             # handle memory ordering and format issues for speed up
             X_ = X.tocsr() if issparse(X) else np.ascontiguousarray(X) if X is not None else X
@@ -313,7 +316,7 @@ if USE_CYTHON:
         def compute_error(self, X, Y, U, V, Z):
             # override because we are solving for Y^T = ZV^T
             return self.alpha * compute_factorization_error(X, U, V.T, self.x_link, self.beta_loss) + \
-                   (1 - self.alpha) * compute_factorization_error(Y, Z, V.T, self.y_link, self.beta_loss)
+                (1 - self.alpha) * compute_factorization_error(Y, Z, V.T, self.y_link, self.beta_loss)
 
 else:
     class NewtonSolver(_IterativeCMFSolver):
@@ -436,8 +439,8 @@ else:
                 res_X_T = inverse(np.dot(U, V.T), x_link) - X
                 res_Y_T = inverse(np.dot(Z, V.T), y_link) - Y.T
                 dV_full = alpha * np.dot(res_X_T.T, U) + \
-                          (1 - alpha) * np.dot(res_Y_T.T, Z) + \
-                          l1_reg * np.sign(V) + l2_reg * V
+                    (1 - alpha) * np.dot(res_Y_T.T, Z) + \
+                    l1_reg * np.sign(V) + l2_reg * V
 
                 if isinstance(dV_full, np.matrix):
                     dV_full = np.asarray(dV_full)
@@ -508,13 +511,14 @@ else:
                 self._row_newton_update(Z, i, dZ, ddZ_inv, non_negative=non_negative)
 
         def update_step(self, X, Y, U, V, Z, l1_reg, l2_reg, alpha):
-            if self.update_U:
-                self._newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
-                                      non_negative=self.U_non_negative, link=self.x_link)
-
-            if self.update_Z:
-                self._newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
-                                      non_negative=self.Z_non_negative, link=self.y_link)
+            if random() <= alpha:
+                if self.update_U:
+                    self._newton_update_U(U, V, X, alpha, l1_reg, l2_reg,
+                                          non_negative=self.U_non_negative, link=self.x_link)
+            else:
+                if self.update_Z:
+                    self._newton_update_Z(Z, V, Y, alpha, l1_reg, l2_reg,
+                                          non_negative=self.Z_non_negative, link=self.y_link)
 
             if self.update_V:
                 self._newton_update_V(V, U, Z, X, Y, alpha, l1_reg, l2_reg,
