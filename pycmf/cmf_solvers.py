@@ -406,12 +406,12 @@ else:
             :param u: row to be updated
             :param v: fixed row
             """
-            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :].T, link, self.beta_loss)
+            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :], link, self.beta_loss)
 
             t = - c * tau
             not_found = True
             while not_found:
-                candidate_error = compute_factorization_error(x[i, :], u[i, :] + eta * grad, v[i, :].T, link, self.beta_loss)
+                candidate_error = compute_factorization_error(x[i, :], u[i, :] + eta * grad, v[i, :], link, self.beta_loss)
                 if current_error - candidate_error >= eta * t:
                     not_found = False
                 else:
@@ -420,14 +420,14 @@ else:
             return eta
 
         def _v_armijo(self, u, v, z, x, y, i, grad, x_link, y_link, eta=1, c=0.001, tau=0.5):
-            current_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :].T, x_link, self.beta_loss) + \
-                (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :].T, y_link, self.beta_loss)
+            current_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :], x_link, self.beta_loss) + \
+                (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :], y_link, self.beta_loss)
 
             t = - c * tau
             not_found = True
             while not_found:
-                candidate_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], (v[i, :] + eta * grad).T, x_link, self.beta_loss) + \
-                    (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], (v[i, :] + eta * grad).T, y_link, self.beta_loss)
+                candidate_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :] + eta * grad, x_link, self.beta_loss) + \
+                    (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :] + eta * grad, y_link, self.beta_loss)
                 if current_error - candidate_error >= eta * t:
                     not_found = False
                 else:
