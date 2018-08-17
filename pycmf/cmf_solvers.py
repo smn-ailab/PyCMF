@@ -395,7 +395,7 @@ else:
             else:
                 return estimate - ground_truth
 
-        def _armijo(self, x, u, v, i, grad, link, alpha=1, c=0.5, tau=0.5):
+        def _armijo(self, x, u, v, i, grad, link, eta=1, c=0.5, tau=0.5):
             """Return best newton step size.
 
             Set t=-c m and iteration counter j = 0.
@@ -406,18 +406,34 @@ else:
             :param u: row to be updated
             :param v: fixed row
             """
-            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :], link, self.beta_loss)
+            current_error = compute_factorization_error(x[i, :], u[i, :], v[i, :].T, link, self.beta_loss)
 
             t = - c * tau
             not_found = True
             while not_found:
-                candidate_error = compute_factorization_error(x[i, :], u[i, :] + alpha * grad, v[i, :], link, self.beta_loss)
-                if current_error - candidate_error >= alpha * t:
+                candidate_error = compute_factorization_error(x[i, :], u[i, :] + eta * grad, v[i, :].T, link, self.beta_loss)
+                if current_error - candidate_error >= eta * t:
                     not_found = False
                 else:
-                    alpha *= tau
+                    eta *= tau
 
-            return alpha
+            return eta
+
+        def _v_armijo(self, u, v, z, x, y, i, grad, x_link, y_link, eta=1, c=0.5, tau=0.5):
+            current_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :].T, x_link, self.beta_loss) + \
+                (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :].T, y_link, self.beta_loss)
+
+            t = - c * tau
+            not_found = True
+            while not_found:
+                candidate_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], (v[i, :] + eta * grad).T, x_link, self.beta_loss) + \
+                    (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], (v[i, :] + eta * grad).T, y_link, self.beta_loss)
+                if current_error - candidate_error >= eta * t:
+                    not_found = False
+                else:
+                    eta *= tau
+
+            return eta
 
         def _newton_update_U(self, U, V, X, alpha, l1_reg, l2_reg,
                              link="linear", non_negative=True):
@@ -455,7 +471,10 @@ else:
                         D = np.diag(d_sigmoid(np.dot(u_i, V_T_sampled)))
                         ddU_inv = self._safe_invert(alpha * np.dot(np.dot(V_T_sampled, D), V_T_sampled.T))
 
-                self._row_newton_update(U, i, dU, ddU_inv, non_negative=non_negative)
+                # Calculate armijo and set eta
+                eta = self._armijo(X, U, V, i, - np.dot(dU, ddU_inv), link)
+
+                self._row_newton_update(U, i, dU, ddU_inv, non_negative=non_negative, eta=eta)
 
         def _newton_update_V(self, V, U, Z, X, Y, alpha, l1_reg, l2_reg,
                              x_link="linear", y_link="linear", non_negative=True):
@@ -510,6 +529,8 @@ else:
                     ddV_inv = self._safe_invert(alpha * ddV_wrt_U +
                                                 (1 - alpha) * ddV_wrt_Z +
                                                 l2_reg * np.eye(V.shape[1]))
+
+                eta = self._v_armijo(U, V, Z, X, Y, i, - np.dot(dV, ddV_inv), x_link, y_link)
 
                 self._row_newton_update(V, i, dV, ddV_inv, non_negative=non_negative)
 
