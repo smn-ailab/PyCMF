@@ -395,7 +395,7 @@ else:
             else:
                 return estimate - ground_truth
 
-        def _armijo(self, x, u, v, i, grad, link, eta=1, c=0.001, tau=0.5):
+        def _armijo(self, x, u, v, i, grad, link, eta=1, c=0.001, tau=0.5, threshold=2 ** (-5)):
             """Return best newton step size.
 
             Set t=-c m and iteration counter j = 0.
@@ -408,7 +408,7 @@ else:
             """
             current_error = compute_factorization_error(x, u, v.T, link, self.beta_loss)
 
-            t = - c * tau
+            t = c * np.dot(grad, - grad)
             not_found = True
             while not_found:
                 updated_u = u
@@ -420,13 +420,17 @@ else:
                 else:
                     eta *= tau
 
+                if eta * grad <= threshold:
+                    eta = 0
+                    not_found = False
+
             return eta
 
-        def _v_armijo(self, u, v, z, x, y, i, grad, x_link, y_link, eta=1, c=0.001, tau=0.5):
+        def _v_armijo(self, u, v, z, x, y, i, grad, x_link, y_link, eta=1, c=0.001, tau=0.5, threshold=2 ** (-5)):
             current_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :], x_link, self.beta_loss) + \
                 (1 - self.alpha) * compute_factorization_error(y[i, :], z[i, :], v[i, :], y_link, self.beta_loss)
 
-            t = - c * tau
+            t = c * np.dot(grad, - grad)
             not_found = True
             while not_found:
                 candidate_error = self.alpha * compute_factorization_error(x[i, :], u[i, :], v[i, :] + eta * grad, x_link, self.beta_loss) + \
@@ -435,6 +439,10 @@ else:
                     not_found = False
                 else:
                     eta *= tau
+
+                if eta * grad <= threshold:
+                    eta = 0
+                    not_found = False
 
             return eta
 
